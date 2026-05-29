@@ -21817,6 +21817,15 @@ kov2nl_300
 kov2nl_302cn
 kov2nl_301cn
 kov2nl_300cn
+kov2nl_302jp
+kov2nl_301jp
+kov2nl_300jp
+kov2nl_302hk
+kov2nl_301hk
+kov2nl_300hk
+kov2nl_302tw
+kov2nl_301tw
+kov2nl_300tw
 kov3
 kov3_102
 kov3_101
@@ -21830,6 +21839,12 @@ orleg2_101cn
 orleg2_104jp
 orleg2_103jp
 orleg2_101jp
+orleg2_104hk
+orleg2_103hk
+orleg2_101hk
+orleg2_104tw
+orleg2_103tw
+orleg2_101tw
 kof98umh
 
 @source:igs/pgm3.cpp
