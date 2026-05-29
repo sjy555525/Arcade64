@@ -882,6 +882,18 @@ void pgm2_state::pgm2_ramrom(machine_config &config)
 	ROM_REGION( 0x04000, "maincpu", 0 ) \
 	ROM_LOAD( "ol2_a10.igs036", 0x00000000, 0x0004000, CRC(69375284) SHA1(a120c6a3d8d7898cc3ca508abea78e5e54090c66) ) // Core V100 Japan
 
+#define ORLEG2_INTERNAL_HONGKONG \
+	ROM_REGION( 0x04000, "maincpu", 0 ) \
+	ROM_LOAD( "xyj2_hk.igs036", 0x00000000, 0x0004000, CRC(ee7343c6) SHA1(e37ce0352255df78af1a290ffdc8331c56d1d2cd) ) \
+	ROM_REGION( 0x108, "default_card", 0 ) \
+	ROM_LOAD( "blank_orleg2_taiwan_card.pg2", 0x000, 0x108, CRC(cff88f98) SHA1(f407a2d77c626587d5e5f2ae74d878763d691182) )
+
+#define ORLEG2_INTERNAL_TAIWAN \
+	ROM_REGION( 0x04000, "maincpu", 0 ) \
+	ROM_LOAD( "xyj2_tw.igs036", 0x00000000, 0x0004000, CRC(3b8a6703) SHA1(addabc4e6d23933a81845d64b033c30c4d96943d) ) \
+	ROM_REGION( 0x108, "default_card", 0 ) \
+	ROM_LOAD( "blank_orleg2_taiwan_card.pg2", 0x000, 0x108, CRC(cff88f98) SHA1(f407a2d77c626587d5e5f2ae74d878763d691182) )
+
 ROM_START( orleg2 )
 	ORLEG2_INTERNAL_OVERSEAS
 	ORLEG2_PROGRAM_104(ol2,fa)
@@ -936,6 +948,42 @@ ROM_START( orleg2_101jp )
 	ORLEG2_VIDEO_SOUND_ROMS
 ROM_END
 
+ROM_START( orleg2_104hk )
+	ORLEG2_INTERNAL_HONGKONG
+	ORLEG2_PROGRAM_104(xyj2,hk)
+	ORLEG2_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( orleg2_103hk )
+	ORLEG2_INTERNAL_HONGKONG
+	ORLEG2_PROGRAM_103(xyj2,hk)
+	ORLEG2_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( orleg2_101hk )
+	ORLEG2_INTERNAL_HONGKONG
+	ORLEG2_PROGRAM_101(xyj2,hk)
+	ORLEG2_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( orleg2_104tw )
+	ORLEG2_INTERNAL_TAIWAN
+	ORLEG2_PROGRAM_104(xyj2,tw)
+	ORLEG2_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( orleg2_103tw )
+	ORLEG2_INTERNAL_TAIWAN
+	ORLEG2_PROGRAM_103(xyj2,tw)
+	ORLEG2_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( orleg2_101tw )
+	ORLEG2_INTERNAL_TAIWAN
+	ORLEG2_PROGRAM_101(xyj2,tw)
+	ORLEG2_VIDEO_SOUND_ROMS
+ROM_END
+
 // Knights of Valour 2 New Legend
 
 #define KOV2NL_VIDEO_SOUND_ROMS \
@@ -982,9 +1030,19 @@ ROM_END
 
 // Region 0x01 - Taiwan  CRC(b3ca3124) SHA1(793d3bdc4bfccb892eb51c351c4ccd103ee9b7ce)
 // uses cards with CRC(1155f01f) SHA1(60f7bed1461b362a3da687503cd72ed2d5e96f30) (same as Oversea, Korea)
+#define KOV2NL_INTERNAL_TAIWAN \
+	ROM_REGION( 0x04000, "maincpu", 0 ) \
+	ROM_LOAD( "gsyj_igs036_taiwan.rom", 0x00000000, 0x0004000, CRC(b3ca3124) SHA1(793d3bdc4bfccb892eb51c351c4ccd103ee9b7ce) ) \
+	ROM_REGION( 0x108, "default_card", 0 ) \
+	ROM_LOAD( "blank_gsyj_taiwan.pg2", 0x000, 0x108, CRC(1155f01f) SHA1(60f7bed1461b362a3da687503cd72ed2d5e96f30) )
 
 // Region 0x02 - Japan CRC(46344f1a) SHA1(fbe846be4a39e8a4c41417858311faaaebf67cb9)
 // uses cards with CRC(0d63cb64) SHA1(957cce2d47f3369bc4f98b1652ba8639c08fb9bd) (unique)
+#define KOV2NL_INTERNAL_JAPAN \
+	ROM_REGION( 0x04000, "maincpu", 0 ) \
+	ROM_LOAD( "kov2nl_igs036_japan.rom", 0x00000000, 0x0004000, CRC(46344f1a) SHA1(fbe846be4a39e8a4c41417858311faaaebf67cb9) ) \
+	ROM_REGION( 0x108, "default_card", 0 ) \
+	ROM_LOAD( "blank_kov2nl_japan_card.pg2", 0x000, 0x108, CRC(0d63cb64) SHA1(957cce2d47f3369bc4f98b1652ba8639c08fb9bd) )
 
 // Region 0x03 - Korea CRC(15619af0) SHA1(619e58e13c4d4351e8a4359a1df1eb9952326e84)
 // uses cards with CRC(1155f01f) SHA1(60f7bed1461b362a3da687503cd72ed2d5e96f30) (same as Oversea, Taiwan)
@@ -992,6 +1050,11 @@ ROM_END
 
 // Region 0x04 - Hong Kong  CRC(76b9b527) SHA1(e77a7b59aca221b5d04dcd1ffc632114be7e5647)
 // uses cards with CRC(02842ae8) SHA1(a6cda633b09a706039a79b73db2c258094826f85) (same as China)
+#define KOV2NL_INTERNAL_HONGKONG \
+	ROM_REGION( 0x04000, "maincpu", 0 ) \
+	ROM_LOAD( "gsyx_igs036_hongkong.rom", 0x00000000, 0x0004000, CRC(76b9b527) SHA1(e77a7b59aca221b5d04dcd1ffc632114be7e5647) ) \
+	ROM_REGION( 0x108, "default_card", 0 ) \
+	ROM_LOAD( "blank_gsyx_hongkong_card.pg2", 0x000, 0x108, CRC(02842ae8) SHA1(a6cda633b09a706039a79b73db2c258094826f85) )
 
 // Region 0x05 - Overseas
 #define KOV2NL_INTERNAL_OVERSEA \
@@ -1035,6 +1098,60 @@ ROM_END
 ROM_START( kov2nl_300cn )
 	KOV2NL_INTERNAL_CHINA
 	KOV2NL_PROGRAM_300(gsyx, cn)
+	KOV2NL_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( kov2nl_302jp )
+	KOV2NL_INTERNAL_JAPAN
+	KOV2NL_PROGRAM_302(kov2nl, jp)
+	KOV2NL_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( kov2nl_301jp )
+	KOV2NL_INTERNAL_JAPAN
+	KOV2NL_PROGRAM_301(kov2nl, jp)
+	KOV2NL_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( kov2nl_300jp )
+	KOV2NL_INTERNAL_JAPAN
+	KOV2NL_PROGRAM_300(kov2nl, jp)
+	KOV2NL_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( kov2nl_302hk )
+	KOV2NL_INTERNAL_HONGKONG
+	KOV2NL_PROGRAM_302(gsyx, hk)
+	KOV2NL_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( kov2nl_301hk )
+	KOV2NL_INTERNAL_HONGKONG
+	KOV2NL_PROGRAM_301(gsyx, hk)
+	KOV2NL_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( kov2nl_300hk )
+	KOV2NL_INTERNAL_HONGKONG
+	KOV2NL_PROGRAM_300(gsyx, hk)
+	KOV2NL_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( kov2nl_302tw )
+	KOV2NL_INTERNAL_TAIWAN
+	KOV2NL_PROGRAM_302(gsyj, tw)
+	KOV2NL_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( kov2nl_301tw )
+	KOV2NL_INTERNAL_TAIWAN
+	KOV2NL_PROGRAM_301(gsyj, tw)
+	KOV2NL_VIDEO_SOUND_ROMS
+ROM_END
+
+ROM_START( kov2nl_300tw )
+	KOV2NL_INTERNAL_TAIWAN
+	KOV2NL_PROGRAM_300(gsyj, tw)
 	KOV2NL_VIDEO_SOUND_ROMS
 ROM_END
 
@@ -1544,6 +1661,14 @@ GAME( 2007, orleg2_104jp, orleg2, pgm2,        pgm2, pgm2_state, init_orleg2,   
 GAME( 2007, orleg2_103jp, orleg2, pgm2,        pgm2, pgm2_state, init_orleg2,   ROT0, "IGS (Alta license)", "Saiyuu Shakuyakuden 2 (V103, Japan)", MACHINE_SUPPORTS_SAVE )
 GAME( 2007, orleg2_101jp, orleg2, pgm2,        pgm2, pgm2_state, init_orleg2,   ROT0, "IGS (Alta license)", "Saiyuu Shakuyakuden 2 (V101, Japan)", MACHINE_SUPPORTS_SAVE )
 
+GAME( 2007, orleg2_104hk, orleg2, pgm2,        pgm2, pgm2_state, init_orleg2,   ROT0, "IGS (Huatong license)", "Xiyou Shi E Chuan 2 (V104, Hong Kong)", MACHINE_SUPPORTS_SAVE )
+GAME( 2007, orleg2_103hk, orleg2, pgm2,        pgm2, pgm2_state, init_orleg2,   ROT0, "IGS (Huatong license)", "Xiyou Shi E Chuan 2 (V103, Hong Kong)", MACHINE_SUPPORTS_SAVE )
+GAME( 2007, orleg2_101hk, orleg2, pgm2,        pgm2, pgm2_state, init_orleg2,   ROT0, "IGS (Huatong license)", "Xiyou Shi E Chuan 2 (V101, Hong Kong)", MACHINE_SUPPORTS_SAVE )
+
+GAME( 2007, orleg2_104tw, orleg2, pgm2,        pgm2, pgm2_state, init_orleg2,   ROT0, "IGS (Huatong license)", "Xiyou Shi E Chuan 2 (V104, Taiwan)", MACHINE_SUPPORTS_SAVE )
+GAME( 2007, orleg2_103tw, orleg2, pgm2,        pgm2, pgm2_state, init_orleg2,   ROT0, "IGS (Huatong license)", "Xiyou Shi E Chuan 2 (V103, Taiwan)", MACHINE_SUPPORTS_SAVE )
+GAME( 2007, orleg2_101tw, orleg2, pgm2,        pgm2, pgm2_state, init_orleg2,   ROT0, "IGS (Huatong license)", "Xiyou Shi E Chuan 2 (V101, Taiwan)", MACHINE_SUPPORTS_SAVE )
+
 // Knights of Valour 2 New Legend
 //三國戰紀2撗掃于軍 New Legend/Sānguó zhàn jì 2 Guàng sǎo yú jūn New Legend (Oversea; Mixed Traditional and Simplified Chinese)
 //三國戰紀2盖世英雄/Sānguó zhàn jì 2 Gàishì yīngxióng (China; Mixed Traditional and Simplified Chinese)
@@ -1556,6 +1681,17 @@ GAME( 2008, kov2nl_302cn, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   
 GAME( 2008, kov2nl_301cn, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS (Huatong license)", "Sanguo Zhan Ji 2 Gaishi Yingxiong (V301, China)", MACHINE_SUPPORTS_SAVE )
 GAME( 2008, kov2nl_300cn, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS (Huatong license)", "Sanguo Zhan Ji 2 Gaishi Yingxiong (V300, China)", MACHINE_SUPPORTS_SAVE )
 
+GAME( 2008, kov2nl_302jp, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS (Alta license)", "Sangoku-Senki 2 Ranse Eiyu (V302, Japan)", MACHINE_SUPPORTS_SAVE )
+GAME( 2008, kov2nl_301jp, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS (Alta license)", "Sangoku-Senki 2 Ranse Eiyu (V301, Japan)", MACHINE_SUPPORTS_SAVE )
+GAME( 2008, kov2nl_300jp, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS (Alta license)", "Sangoku-Senki 2 Ranse Eiyu (V300, Japan)", MACHINE_SUPPORTS_SAVE )
+
+GAME( 2008, kov2nl_302hk, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS", "Sanguo Zhan Ji 2 Gaishi Yingxiong (V302, Hong Kong)", MACHINE_SUPPORTS_SAVE )
+GAME( 2008, kov2nl_301hk, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS", "Sanguo Zhan Ji 2 Gaishi Yingxiong (V301, Hong Kong)", MACHINE_SUPPORTS_SAVE )
+GAME( 2008, kov2nl_300hk, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS", "Sanguo Zhan Ji 2 Gaishi Yingxiong (V300, Hong Kong)", MACHINE_SUPPORTS_SAVE )
+
+GAME( 2008, kov2nl_302tw, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS", "Sanguo Zhan Ji 2 Guang Sao Yu Jun (V302, Taiwan)", MACHINE_SUPPORTS_SAVE )
+GAME( 2008, kov2nl_301tw, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS", "Sanguo Zhan Ji 2 Guang Sao Yu Jun (V301, Taiwan)", MACHINE_SUPPORTS_SAVE )
+GAME( 2008, kov2nl_300tw, kov2nl, pgm2,        pgm2, pgm2_state, init_kov2nl,   ROT0, "IGS", "Sanguo Zhan Ji 2 Guang Sao Yu Jun (V300, Taiwan)", MACHINE_SUPPORTS_SAVE )
 
 // Dodonpachi Daioujou Tamashii - should be a V200 too
 GAME( 2010, ddpdojt,      0,      pgm2_ramrom, pgm2, pgm2_state, init_ddpdojt,  ROT270, "IGS / Cave (Tong Li Animation license)", "DoDonPachi Dai-Ou-Jou Tamashii (V201, China)", MACHINE_SUPPORTS_SAVE )
