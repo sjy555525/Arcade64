@@ -3893,7 +3893,7 @@ void namcos23_state::render_direct_poly(const namcos23_render_entry *re)
 			int index = indices[i][j];
 			u16 const *src = &re->direct.d[4 + index * 6];
 
-			p->pv[j].p[0] = 1.f
+			p->pv[j].p[0] = 1.f;
 			p->pv[j].p[1] = ((src[0] >> 4) + 0.5) * p->pv[j].p[0];
 			p->pv[j].p[2] = ((src[1] >> 4) + 0.5) * p->pv[j].p[0];
 			p->pv[j].p[3] = (src[4] >> 8) * p->pv[j].p[0];
