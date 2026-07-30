@@ -2697,14 +2697,6 @@ namco/namcos22.cpp
 
 namco/namcos23.cpp
 -crszonev2a
--gunwars
--gunwarsa
--rapidrvr
--rapidrvrp
--rapidrvrv2c
--motoxgo
--motoxgov1
--motoxgov2
 
 //namco/namcos6.cpp             // black screen
 
