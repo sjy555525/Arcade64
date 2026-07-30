@@ -1488,6 +1488,7 @@ struct namcos23_render_entry
 	s16 vp_size_y;
 	s16 vp_offset_x;
 	s16 vp_offset_y;
+	u32 vp_layer;
 	float vp_fov;
 
 	union
@@ -1539,6 +1540,7 @@ struct namcos23_render_data
 	s16 vp_size_y;
 	s16 vp_offset_x;
 	s16 vp_offset_y;
+	u32 vp_layer;
 
 	s32 fadecolor_r;
 	s32 fadecolor_g;
@@ -1738,6 +1740,7 @@ public:
 		m_vp_size_y(240),
 		m_vp_offset_x(0),
 		m_vp_offset_y(0),
+		m_vp_layer(0),
 		m_scaling(0x4000),
 		m_c361_irqnum(0),
 		m_c422_irqnum(0),
@@ -1880,6 +1883,7 @@ protected:
 	void c435_state_set_interrupt(const u16 *param);
 	void c435_state_set_viewport_data(const u16 *param);
 	void c435_state_set_clip_data_line(const u16 *param);
+	void c435_state_set_clip_extra_line(const u16 *param);
 	void c435_state_set(u16 type, const u16 *param);
 	int c435_get_state_entry_size(u16 type);
 
@@ -2004,6 +2008,7 @@ protected:
 	s16 m_vp_size_y;
 	s16 m_vp_offset_x;
 	s16 m_vp_offset_y;
+	u32 m_vp_layer;
 
 	// There may only be 128 matrix and vector slots.
 	// At 0x1e bytes per slot, rounded up to 0x20, that's 0x1000 to 0x2000 bytes.
@@ -2538,6 +2543,7 @@ void namcos23_state::c435_state_set_viewport_data(const u16 *param)
 	const u16 vp_offset_y_raw = (u16)((vp_data_raw >> 12) & 0x0fff);
 	m_vp_offset_x = ((s16)(vp_offset_x_raw << 4)) >> 4;
 	m_vp_offset_y = -(((s16)(vp_offset_y_raw << 4)) >> 4);
+	m_vp_layer = param[3] & 0x000f;
 }
 
 void namcos23_state::c435_state_set_clip_data_line(const u16 *param)
@@ -2561,8 +2567,10 @@ void namcos23_state::c435_state_set_clip_data_line(const u16 *param)
 
 	if (m_clip_data_line == 0 && m_clip_data[10] != 0.f)
 	{
-		m_vp_size_y = (s16)std::roundf(std::abs(m_clip_data[10]) * std::abs(m_clip_data[23]));
-		m_vp_size_x = (s16)std::roundf((float)m_vp_size_y * std::abs(m_clip_data[2]) / std::abs(m_clip_data[10]));
+		const float clip10_normalized = std::abs(m_clip_data[10]) / std::abs(m_clip_data[9]);
+		const float clip2_normalized = std::abs(m_clip_data[2]) / std::abs(m_clip_data[0]);
+		m_vp_size_y = (s16)std::roundf(clip10_normalized * std::abs(m_clip_data[23]));
+		m_vp_size_x = (s16)std::roundf(((float)m_vp_size_y * clip2_normalized) / clip10_normalized);
 	}
 
 	std::ostringstream buf2;
@@ -2573,6 +2581,14 @@ void namcos23_state::c435_state_set_clip_data_line(const u16 *param)
 	}
 	buf2 << "\n";
 	LOGMASKED(LOG_CLIP_DATA, "%s: %s", machine().describe_context(), std::move(buf2).str());
+}
+
+void namcos23_state::c435_state_set_clip_extra_line(const u16 *param)
+{
+	LOGMASKED(LOG_CLIP_DATA, "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x %04x\n",
+		param[ 0], param[ 1], param[ 2], param[ 3], param[ 4], param[ 5], param[ 6], param[ 7],
+		param[ 8], param[ 9], param[10], param[11], param[12], param[13], param[14], param[15],
+		param[16], param[17], param[18]);
 }
 
 void namcos23_state::c435_state_reset_w(u16 data)
@@ -2906,7 +2922,12 @@ void namcos23_state::c435_state_set(u16 type, const u16 *param)
 	switch (type)
 	{
 	case 0x0000:
+	case 0x0001:
 	{
+		if (type == 0x0001 && m_c435.buffer[0] != 0x4f38)
+		{
+			break;
+		}
 		render_t &render = m_render;
 		namcos23_render_entry *re = render.entries[render.cur] + render.count[render.cur];
 		re->type = IMMEDIATE;
@@ -2932,6 +2953,7 @@ void namcos23_state::c435_state_set(u16 type, const u16 *param)
 		re->vp_offset_x = m_vp_offset_x;
 		re->vp_offset_y = m_vp_offset_y;
 		re->vp_fov = m_clip_data[23];
+		re->vp_layer = m_vp_layer;
 		if (m_c435.buffer[0] == 0x4f38)
 		{
 			re->immediate.type  =  param[ 0];
@@ -3018,6 +3040,7 @@ void namcos23_state::c435_state_set(u16 type, const u16 *param)
 		re->vp_offset_x = m_vp_offset_x;
 		re->vp_offset_y = m_vp_offset_y;
 		re->vp_fov = m_clip_data[23];
+		re->vp_layer = m_vp_layer;
 		/*
 		3-e0: 1110 0000, has shade+tex+pos
 		3-a0: 1010 0000, has tex+pos
@@ -3078,6 +3101,9 @@ void namcos23_state::c435_state_set(u16 type, const u16 *param)
 		render.count[render.cur]++;
 		break;
 	}
+	case 0x0009:
+		c435_state_set_clip_extra_line(param);
+		break;
 	case 0x000a:
 	{
 		render_t &render = m_render;
@@ -3105,6 +3131,7 @@ void namcos23_state::c435_state_set(u16 type, const u16 *param)
 		re->vp_offset_x = m_vp_offset_x;
 		re->vp_offset_y = m_vp_offset_y;
 		re->vp_fov = m_clip_data[23];
+		re->vp_layer = m_vp_layer;
 		re->immediate.type  =  param[ 0];
 		re->immediate.h     = (param[ 1] << 16) | param[ 2];
 		re->immediate.pal   = (param[ 3] << 16) | param[ 4];
@@ -3132,9 +3159,6 @@ void namcos23_state::c435_state_set(u16 type, const u16 *param)
 		render.count[render.cur]++;
 		break;
 	}
-	case 0x0001:
-		c435_state_set_interrupt(param);
-		break;
 	case 0x0036:
 		LOGMASKED(LOG_3D_STATE_UNK, "%s: unknown state set (%04x)\n", machine().describe_context(), m_c435.buffer[0]);
 		for (int i = 0; i < (m_c435.buffer[0] & 0xff); i++)
@@ -3151,6 +3175,10 @@ void namcos23_state::c435_state_set(u16 type, const u16 *param)
 		for (int i = 0; i < (m_c435.buffer[0] & 0xff); i++)
 			LOGMASKED(LOG_3D_STATE_UNK, "%s: Word %02x: %04x\n", machine().describe_context(), i, m_c435.buffer[1 + i]);
 		break;
+	}
+	if (type == 0x0001)
+	{
+		c435_state_set_interrupt(param);
 	}
 }
 
@@ -3273,6 +3301,7 @@ void namcos23_state::c435_render() // 8
 	re->vp_offset_x = m_vp_offset_x;
 	re->vp_offset_y = m_vp_offset_y;
 	re->vp_fov = m_clip_data[23];
+	re->vp_layer = m_vp_layer;
 	re->model.light_vector[0] = m_light_vector[0];
 	re->model.light_vector[1] = m_light_vector[1];
 	re->model.light_vector[2] = m_light_vector[2];
@@ -3845,7 +3874,7 @@ void namcos23_state::render_direct_poly(const namcos23_render_entry *re)
 {
 	render_t &render = m_render;
 
-	u32 polyshift = ((re->direct.d[1] & 0x1ff) << 12) | (re->direct.d[0] & 0xfff);
+	u32 polyshift = ((re->direct.d[1] & 0xfff) << 12) | (re->direct.d[0] & 0xfff);
 	u32 cztype = re->direct.d[3] & 3;
 	u32 flags = ((re->direct.d[3] << 6) & 0x1fff) | cztype;
 
@@ -3864,21 +3893,7 @@ void namcos23_state::render_direct_poly(const namcos23_render_entry *re)
 			int index = indices[i][j];
 			u16 const *src = &re->direct.d[4 + index * 6];
 
-			int mantissa = src[5];
-			int exponent = src[4] & 0x3f;
-
-			if (mantissa)
-			{
-				p->pv[j].p[0] = mantissa;
-				while (exponent < 0x2e)
-				{
-					p->pv[j].p[0] /= 2.0f;
-					exponent++;
-				}
-			}
-			else
-				p->pv[j].p[0] = 1.f;
-
+			p->pv[j].p[0] = 1.f
 			p->pv[j].p[1] = ((src[0] >> 4) + 0.5) * p->pv[j].p[0];
 			p->pv[j].p[2] = ((src[1] >> 4) + 0.5) * p->pv[j].p[0];
 			p->pv[j].p[3] = (src[4] >> 8) * p->pv[j].p[0];
@@ -3886,20 +3901,10 @@ void namcos23_state::render_direct_poly(const namcos23_render_entry *re)
 			p->pv[j].y = ((s16)src[3] + 240);
 		}
 
-		int zsort = 0;
-		if (zsort > 0x1fffff) zsort = 0x1fffff;
-
+		int zsort = polyshift;
 		int absolute_priority = re->absolute_priority & 7;
-		if (BIT(polyshift, 21))
-			zsort = polyshift & 0x1fffff;
-		else
-		{
-			zsort += BIT(polyshift, 17) ? (polyshift | 0xfffc0000) : (polyshift & 0x0001ffff);
-			absolute_priority += (polyshift & 0x1c0000) >> 18;
-		}
-
 		zsort = std::clamp(zsort, 0, 0x1fffff);
-		zsort |= (absolute_priority << 21);
+		zsort |= (absolute_priority << 24) | (re->vp_layer << 28);
 		p->zkey = zsort;
 		p->index = render.poly_count;
 
@@ -3921,6 +3926,7 @@ void namcos23_state::render_direct_poly(const namcos23_render_entry *re)
 		p->rd.vp_size_y = re->vp_size_y;
 		p->rd.vp_offset_x = re->vp_offset_x;
 		p->rd.vp_offset_y = re->vp_offset_y;
+		p->rd.vp_layer = re->vp_layer;
 
 		p->rd.fogfactor = 0;
 		p->rd.fadefactor = 0xff;
@@ -3950,7 +3956,7 @@ void namcos23_state::render_direct_poly(const namcos23_render_entry *re)
 		p->rd.poly_alpha_pen = re->poly_alpha_pen;
 
 		// blend
-		p->rd.blend_enabled = false;
+		p->rd.blend_enabled = BIT(re->direct.d[2], 4);
 
 		render.poly_count++;
 	}
@@ -4059,17 +4065,23 @@ void namcos23_state::render_immediate(const namcos23_render_entry *re)
 	u32 ne   = (type >> 8) & 0xf;
 	bool stencil_enabled = BIT(h, 11);
 
-	float minz = FLT_MAX;
-	float maxz = FLT_MIN;
+	int minz = INT_MAX;
+	int maxz = INT_MIN;
 
 	for (int i = 0; i < ne; i++)
 	{
-		pv[i].x = s32(re->immediate.x[i]) / 16384.f;
-		pv[i].y = s32(re->immediate.y[i]) / 16384.f;
-		pv[i].p[0] = (s32)re->immediate.z[i] / 16384.f;
-		pv[i].p[1] = (s32)re->immediate.u[i];
-		pv[i].p[2] = (s32)re->immediate.v[i];
-		pv[i].p[3] = (s32)re->immediate.i[i];
+		pv[i].x = util::sext(re->immediate.x[i], 24) / 16384.f;
+		pv[i].y = util::sext(re->immediate.y[i], 24) / 16384.f;
+		pv[i].p[0] = s32(re->immediate.z[i]) / 16384.f;
+		pv[i].p[1] = s32(re->immediate.u[i]);
+		pv[i].p[2] = s32(re->immediate.v[i]);
+		pv[i].p[3] = s32(re->immediate.i[i]);
+
+		if ((s32)(re->immediate.z[i] & 0x00ffffff) < minz)
+			minz = (s32)(re->immediate.z[i] & 0x00ffffff);
+		if ((s32)(re->immediate.z[i] & 0x00ffffff) > maxz)
+			maxz = (s32)(re->immediate.z[i] & 0x00ffffff);
+
 	}
 
 	namcos23_poly_entry *p = render.polys + render.poly_count;
@@ -4087,10 +4099,6 @@ void namcos23_state::render_immediate(const namcos23_render_entry *re)
 			p->pv[i].y /= z;
 
 			z *= 16384.f;
-			if (z > maxz)
-				maxz = z;
-			if (z < minz)
-				minz = z;
 
 			render_project(p->pv[i], re->vp_size_x, re->vp_size_y, re->vp_fov);
 
@@ -4101,8 +4109,19 @@ void namcos23_state::render_immediate(const namcos23_render_entry *re)
 		}
 
 		// Compute an odd sorta'-Z thing that can situate the polygon wherever you want in Z-depth
-		int zsort = 0.5f * (minz + maxz) + 0.5f;
-		if (zsort > 0x1fffff) zsort = 0x1fffff;
+		int zsort = 0;
+		switch (h & 0x300)
+		{
+		case 0x000:
+			zsort = minz + 0.5f;
+			break;
+		case 0x100:
+			zsort = maxz + 0.5f;
+			break;
+		default:
+			zsort = 0.5f * (minz + maxz) + 0.5f;
+			break;
+		}
 
 		int absolute_priority = re->absolute_priority & 7;
 		if (BIT(polyshift, 21))
@@ -4113,7 +4132,7 @@ void namcos23_state::render_immediate(const namcos23_render_entry *re)
 			absolute_priority += (polyshift & 0x1c0000) >> 18;
 		}
 
-		p->zkey = zsort | (absolute_priority << 21);
+		p->zkey = zsort | (absolute_priority << 24) | (re->vp_layer << 28);
 		p->index = render.poly_count;
 
 		p->rd.stencil_enabled = stencil_enabled;
@@ -4124,11 +4143,13 @@ void namcos23_state::render_immediate(const namcos23_render_entry *re)
 		p->rd.immediate = true;
 		p->rd.shade_enabled = true;
 		p->rd.h = h;
-		p->rd.type = type;
+		p->rd.type = re->type;
+		p->rd.prioverchar = 0;
 		p->rd.vp_size_x = re->vp_size_x;
 		p->rd.vp_size_y = re->vp_size_y;
 		p->rd.vp_offset_x = re->vp_offset_x;
 		p->rd.vp_offset_y = re->vp_offset_y;
+		p->rd.vp_layer = re->vp_layer;
 		p->rd.tbase = 0;
 
 		// global fade
@@ -4153,7 +4174,6 @@ void namcos23_state::render_immediate(const namcos23_render_entry *re)
 		p->rd.alpha_enabled = ((re->immediate.pal >> 8) & 0x7f) != re->poly_alpha_color;
 		p->rd.poly_alpha_pen = re->poly_alpha_pen;
 		p->rd.blend_enabled = BIT(h, 10);
-		p->rd.type = re->type;
 
 		render.poly_count++;
 	}
@@ -4194,7 +4214,7 @@ void namcos23_state::render_model(const namcos23_render_entry *re)
 		u32 polyshift = 0;
 		if (type & 0x00001000)
 		{
-			polyshift = data[offs++];
+			polyshift = data[offs++] & 0x00ffffff;
 		}
 		u8 alpha = 0xff;
 
@@ -4397,7 +4417,6 @@ void namcos23_state::render_model(const namcos23_render_entry *re)
 				zsort = 0.5f * (minz + maxz) + 0.5f;
 				break;
 			}
-			if (zsort > 0x1fffff) zsort = 0x1fffff;
 
 			int absolute_priority = re->absolute_priority & 7;
 			if (BIT(polyshift, 21))
@@ -4409,11 +4428,10 @@ void namcos23_state::render_model(const namcos23_render_entry *re)
 			}
 
 			zsort = std::clamp(zsort, 0, 0x1fffff);
-			zsort |= (absolute_priority << 21);
+			zsort |= (absolute_priority << 24) | (re->vp_layer << 28);
 			p->zkey = zsort;
 			p->index = render.poly_count;
 
-			p->rd.type = re->type;
 			p->rd.stencil_enabled = stencil_enabled;
 			p->rd.pens = m_palette->pens() + (color << 8);
 			p->rd.rgb = (alpha << 24) | 0x00ffffff;
@@ -4432,6 +4450,7 @@ void namcos23_state::render_model(const namcos23_render_entry *re)
 			p->rd.vp_size_y = re->vp_size_y;
 			p->rd.vp_offset_x = re->vp_offset_x;
 			p->rd.vp_offset_y = re->vp_offset_y;
+			p->rd.vp_layer = re->vp_layer;
 
 			p->rd.fogfactor = 0;
 			p->rd.fadefactor = 0xff;
@@ -4637,6 +4656,7 @@ void gorgon_state::render_run(screen_device &screen, bitmap_rgb32 &bitmap)
 			re->vp_offset_x = m_vp_offset_x;
 			re->vp_offset_y = m_vp_offset_y;
 			re->vp_fov = m_clip_data[23];
+			re->vp_layer = m_vp_layer;
 			re->absolute_priority = m_absolute_priority;
 			re->model_blend_factor = 0;
 			re->tx = 0;
@@ -6064,6 +6084,7 @@ void namcos23_state::direct_buf_w(offs_t offset, u16 data, u16 mem_mask)
 		re->vp_offset_x = 0;
 		re->vp_offset_y = 0;
 		re->vp_fov = 320.f;
+		re->vp_layer = m_vp_layer;
 		memcpy(re->direct.d, m_c435.direct_buf, sizeof(m_c435.direct_buf));
 		render.count[render.cur]++;
 
@@ -6127,9 +6148,11 @@ void namcos23_state::ctl_vbl_ack_w(offs_t offset, u16 data)
 
 void namcos23_state::ctl_direct_poly_w(offs_t offset, u16 data)
 {
-	// gmen wars spams this heavily with 0 prior to starting the GMEN board test
-	LOGMASKED(LOG_DIRECT, "%s: ctl_direct_poly_w: %04x\n", machine().describe_context(), data);
-	m_c435.direct_buf[m_c435.direct_buf_pos++] = data;
+	if (m_c435.direct_buf_nonempty || data != 0)
+	{
+		LOGMASKED(LOG_DIRECT, "%s: ctl_direct_poly_w: %04x\n", machine().describe_context(), data);
+		m_c435.direct_buf[m_c435.direct_buf_pos++] = data;
+	}
 	if (data)
 		m_c435.direct_buf_nonempty = true;
 	if (m_c435.direct_buf_pos >= 28)
@@ -6640,6 +6663,7 @@ void namcoss23_gmen_state::sh2_map(address_map &map)
 	map(0x00000000, 0x0000ffff).mirror(0x01000000).rw(FUNC(namcoss23_gmen_state::sh2_shared_r), FUNC(namcoss23_gmen_state::sh2_shared_w));
 	map(0x01400000, 0x014003ff).r(FUNC(namcoss23_gmen_state::vpx_line_r));
 	map(0x01800000, 0x01bfffff).ram();
+	map(0x02001000, 0x02001003).nopr();
 	map(0x02800000, 0x02800003).rw(FUNC(namcoss23_gmen_state::sh2_vpxstate_r), FUNC(namcoss23_gmen_state::sh2_vpxstate_w));
 	map(0x03000000, 0x03000003).r(FUNC(namcoss23_gmen_state::sh2_dsw_r));
 	map(0x04000000, 0x043fffff).ram(); // SH-2 main work RAM (SDRAM)
@@ -7611,7 +7635,7 @@ static INPUT_PORTS_START(finfurl)
 	PORT_BIT(0xffff, 0x8000, IPT_AD_STICK_Y) PORT_SENSITIVITY(100) PORT_KEYDELTA(2560) PORT_NAME("Swing")
 
 	PORT_MODIFY("JVS_ANALOG_INPUT2")
-	PORT_BIT(0xffff, 0x8000, IPT_AD_STICK_X) PORT_MINMAX(0x5000, 0xb000) PORT_SENSITIVITY(100) PORT_KEYDELTA(2560) PORT_NAME("Handle") PORT_REVERSE
+	PORT_BIT(0xffff, 0x8000, IPT_AD_STICK_X) PORT_MINMAX(0x1000, 0xf000) PORT_SENSITIVITY(100) PORT_KEYDELTA(2560) PORT_NAME("Handle") PORT_REVERSE
 INPUT_PORTS_END
 
 static INPUT_PORTS_START(finfurl2)
@@ -7626,7 +7650,7 @@ static INPUT_PORTS_START(finfurl2)
 	PORT_BIT(0x00e07f00, IP_ACTIVE_HIGH, IPT_UNUSED) // BUTTON4/BUTTON5/BUTTON6/BUTTON7/BUTTON8/BUTTON9/BUTTON10/BUTTON11/BUTTON12/BUTTON13
 
 	PORT_MODIFY("JVS_ANALOG_INPUT1")
-	PORT_BIT(0xffff, 0x8000, IPT_AD_STICK_Y) PORT_SENSITIVITY(100) PORT_KEYDELTA(2560) PORT_NAME("Swing")
+	PORT_BIT(0xffff, 0x0000, IPT_AD_STICK_Y) PORT_MINMAX(0x0000, 0xfff0) PORT_SENSITIVITY(100) PORT_KEYDELTA(1000) PORT_NAME("Swing")
 
 	PORT_MODIFY("JVS_ANALOG_INPUT2")
 	PORT_BIT(0xffff, 0x8000, IPT_AD_STICK_X) PORT_MINMAX(0x5000, 0xb000) PORT_SENSITIVITY(100) PORT_KEYDELTA(2560) PORT_NAME("Handle") PORT_REVERSE
