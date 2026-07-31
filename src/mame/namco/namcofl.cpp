@@ -165,6 +165,7 @@ OSC3: 48.384MHz
 #include "namco_c123tmap.h"
 #include "namco_c116.h"
 #include "namco_c169roz.h"
+#include "namco_c345.h"
 #include "namco_c355spr.h"
 #include "namcomcu.h"
 
@@ -194,6 +195,7 @@ public:
 		m_screen(*this, "screen"),
 		m_c123tmap(*this, "c123tmap"),
 		m_c169roz(*this, "c169roz"),
+		m_c345(*this, "c345"),
 		m_c355spr(*this, "c355spr"),
 		m_mcu(*this, "mcu"),
 		m_workram(*this, "workram"),
@@ -220,6 +222,7 @@ private:
 	required_device<screen_device> m_screen;
 	required_device<namco_c123tmap_device> m_c123tmap;
 	required_device<namco_c169roz_device> m_c169roz;
+	required_device<namco_c345_device> m_c345;
 	required_device<namco_c355spr_device> m_c355spr;
 	required_device<m37710_cpu_device> m_mcu;
 
@@ -244,7 +247,6 @@ private:
 	static constexpr int m_irq_type[] = { I960_IRQ0, I960_IRQ1, I960_IRQ2, I960_IRQ3 };
 
 	u32 unk1_r();
-	u8 network_r(offs_t offset);
 	u32 sysreg_r();
 	void sysreg_w(offs_t offset, u32 data, u32 mem_mask = ~0);
 	void c116_w(offs_t offset, u8 data);
@@ -350,18 +352,9 @@ int namcofl_state::objcode2tile(int code)
 	return code;
 }
 
-
-u32 namcofl_state::unk1_r()
+uint32_t namcofl_state::unk1_r()
 {
 	return 0xffffffff;
-}
-
-u8 namcofl_state::network_r(offs_t offset)
-{
-	if (offset == 1)
-		return 0x7d;
-
-	return 0xff;
 }
 
 u32 namcofl_state::sysreg_r()
@@ -408,8 +401,9 @@ void namcofl_state::main_map(address_map &map)
 	map(0x30000000, 0x30001fff).flags(i960_cpu_device::BURST).ram().share("nvram");
 	map(0x30100000, 0x30100003).flags(i960_cpu_device::BURST).w(FUNC(namcofl_state::spritebank_w));
 	map(0x30284000, 0x3028bfff).flags(i960_cpu_device::BURST).ram().share(m_shareram);
-	map(0x30300000, 0x30303fff).flags(i960_cpu_device::BURST).ram(); // COMRAM
-	map(0x30380000, 0x303800ff).flags(i960_cpu_device::BURST).r(FUNC(namcofl_state::network_r)).umask32(0x00ff00ff); // network registers
+//	map(0x30300000, 0x30303fff).flags(i960_cpu_device::BURST).m(m_c345, FUNC(namco_c345_device::data_map));
+	map(0x30300000, 0x30303fff).flags(i960_cpu_device::BURST).rw(m_c345, FUNC(namco_c345_device::ram_r),FUNC(namco_c345_device::ram_w)); // this is a workaround - the above does NOT work
+	map(0x30380000, 0x303800ff).flags(i960_cpu_device::BURST).m(m_c345, FUNC(namco_c345_device::regs_map));
 	map(0x30400000, 0x30407fff).flags(i960_cpu_device::BURST).r(m_c116, FUNC(namco_c116_device::read)).w(FUNC(namcofl_state::c116_w));
 	map(0x30800000, 0x3080ffff).flags(i960_cpu_device::BURST).rw(m_c123tmap, FUNC(namco_c123tmap_device::videoram16_r), FUNC(namco_c123tmap_device::videoram16_w));
 	map(0x30a00000, 0x30a0003f).flags(i960_cpu_device::BURST).rw(m_c123tmap, FUNC(namco_c123tmap_device::control16_r), FUNC(namco_c123tmap_device::control16_w));
@@ -629,7 +623,7 @@ INPUT_PORTS_END
 
 TIMER_CALLBACK_MEMBER(namcofl_state::network_interrupt_callback)
 {
-	m_maincpu->set_input_line(I960_IRQ0, ASSERT_LINE);
+	//m_maincpu->set_input_line(I960_IRQ0, ASSERT_LINE);
 	m_network_interrupt_timer->adjust(m_screen->frame_period());
 }
 
@@ -638,6 +632,7 @@ TIMER_CALLBACK_MEMBER(namcofl_state::vblank_interrupt_callback)
 {
 	m_maincpu->set_input_line(I960_IRQ2, ASSERT_LINE);
 	m_vblank_interrupt_timer->adjust(m_screen->frame_period());
+	m_c345->vblank_tick();
 }
 
 
@@ -738,6 +733,8 @@ void namcofl_state::namcofl(machine_config &config)
 
 	NAMCO_C116(config, m_c116);
 	m_c116->enable_shadows();
+
+	NAMCO_C345(config, m_c345, 0U);
 
 	SPEAKER(config, "speaker", 2).front();
 	c352_device &c352(C352(config, "c352", 48.384_MHz_XTAL / 2, 288));

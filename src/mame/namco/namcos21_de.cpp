@@ -17,10 +17,6 @@ NOTES:
   About projection angles of left and right screen, the angle is correct on "DRIVER'S EYES" title screen,
   however in the tracks of demo mode it doesn't seem correct. (probably wants angle sent by main board?)
 
-TODO:
-- add communications for Left and Right screen (linked C139 or something else?)
-- verify video timing, it's assumed to be the same as namcos21 with a different XTAL
-
 */
 
 #include "emu.h"
@@ -57,6 +53,8 @@ class namco_de_pcbstack_device : public device_t
 public:
 	// construction/destruction
 	namco_de_pcbstack_device(const machine_config &mconfig, const char *tag, device_t *owner, u8 pcb, u32 clock = 0);
+
+	void sci_de_hack(uint8_t data);
 
 protected:
 	virtual void device_add_mconfig(machine_config &config) override ATTR_COLD;
@@ -106,6 +104,7 @@ private:
 	void system_reset_w(u8 data);
 	void reset_all_subcpus(int state);
 	void vblank_irq(int state);
+	void sci_int_w(int state);
 
 	bool sprite_mix_callback(u16 &dest, u8 &destpri, u16 colbase, u16 src, int srcpri, int pri);
 	u32 screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
@@ -195,7 +194,8 @@ void namco_de_pcbstack_device::device_add_mconfig(machine_config &config)
 	NAMCO_C148(config, m_slave_intc, m_slave, false);
 	m_slave_intc->link_c148_device(m_master_intc);
 
-	NAMCO_C139(config, m_sci);
+	NAMCO_C139(config, m_sci, 0U);
+	m_sci->irq_cb().set(FUNC(namco_de_pcbstack_device::sci_int_w));
 
 	// video hardware
 	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
@@ -390,7 +390,7 @@ void namco_de_pcbstack_device::driveyes_common_map(address_map &map)
 	map(0x800000, 0x8fffff).rom().region("data", 0);
 	map(0x900000, 0x90ffff).ram().share("sharedram");
 	map(0xa00000, 0xa00fff).rw(FUNC(namco_de_pcbstack_device::dpram_word_r), FUNC(namco_de_pcbstack_device::dpram_word_w));
-	map(0xb00000, 0xb03fff).rw(m_sci, FUNC(namco_c139_device::ram_r), FUNC(namco_c139_device::ram_w));
+	map(0xb00000, 0xb03fff).m(m_sci, FUNC(namco_c139_device::data_map));
 	map(0xb80000, 0xb8000f).m(m_sci, FUNC(namco_c139_device::regs_map));
 }
 
@@ -460,6 +460,17 @@ void namco_de_pcbstack_device::vblank_irq(int state)
 	}
 }
 
+void namco_de_pcbstack_device::sci_int_w(int state)
+{
+	m_master_intc->sci_irq_trigger();
+	m_slave_intc->sci_irq_trigger();
+}
+
+void namco_de_pcbstack_device::sci_de_hack(uint8_t data)
+{
+	m_sci->sci_de_hack(data);
+}
+
 void namco_de_pcbstack_device::device_start()
 {
 	u32 max = memregion("audiocpu")->bytes() / 0x4000;
@@ -491,6 +502,7 @@ public:
 	{ }
 
 	void driveyes(machine_config &config);
+	void init_driveyes();
 
 private:
 	required_device_array<namco_de_pcbstack_device, 3> m_pcb;
@@ -833,8 +845,15 @@ ROM_START( driveyes )
 	ROM_LOAD( "nvram", 0x0000, 0x2000, CRC(fa6623e9) SHA1(8c313f136724eb6c829261b223a2ac1fc08d00c2) )
 ROM_END
 
+void namcos21_de_state::init_driveyes()
+{
+	m_pcb[0]->sci_de_hack(0);
+	m_pcb[1]->sci_de_hack(1);
+	m_pcb[2]->sci_de_hack(2);
+}
+
 
 /*    YEAR  NAME       PARENT    MACHINE   INPUT       CLASS           INIT           MONITOR  COMPANY  FULLNAME                                 FLAGS */
 
 // 3 PCB stacks in a single cage (3x 4 PCBs) linked for 3 screen panorama, boards look similar to original Namco System 21 (not 21B) including TMS320C25 DSP, but use C68 I/O MCU and sprite chip instead of "68000 'GPU'" ?
-GAME( 1992, driveyes,  0,        driveyes, driveyes,   namcos21_de_state, empty_init, ROT0,    "Namco", "Driver's Eyes (Japan) (1992/01/10, Main Ver 2.1, Sub Ver 1.1)", MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_NODEVICE_LAN | MACHINE_SUPPORTS_SAVE )
+GAME( 1992, driveyes,  0,        driveyes, driveyes,   namcos21_de_state, init_driveyes, ROT0,    "Namco", "Driver's Eyes (Japan) (1992/01/10, Main Ver 2.1, Sub Ver 1.1)", MACHINE_IMPERFECT_GRAPHICS | MACHINE_SUPPORTS_SAVE )
