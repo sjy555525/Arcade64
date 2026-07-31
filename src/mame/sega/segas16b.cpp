@@ -4354,6 +4354,7 @@ void segas16b_state::lockonph(machine_config &config)
 	m_screen->set_raw(MASTER_CLOCK_25MHz/4, 400, 0, 320, 262, 0, 224); // wrong, other XTAL seems to be 17Mhz?
 	m_screen->set_screen_update(FUNC(segas16b_state::screen_update));
 	m_screen->set_palette(m_palette);
+	m_screen->set_video_attributes(VIDEO_UPDATE_AFTER_VBLANK);
 
 	SEGA_SYS16B_SPRITES(config, m_sprites);
 	SEGAIC16VID(config, m_segaic16vid, m_gfxdecode);
