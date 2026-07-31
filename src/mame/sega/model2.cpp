@@ -2917,7 +2917,7 @@ void model2b_state::powsled(machine_config &config)
 	io.an_port_callback<7>().set_ioport("P2_L");
 	// 0 and 2 is Motion AD
 
-	subdevice<m2comm_device>("m2comm")->set_frameoffset(0x180);
+	subdevice<sega_m2comm_device>("m2comm")->set_frameoffset(0x180);
 }
 
 
