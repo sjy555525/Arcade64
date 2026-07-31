@@ -2670,7 +2670,6 @@ namco/namcos10.cpp
 -sugorotc
 -sugorotca
 -sugorotcb
--taikort
 
 namco/namcos11.cpp
 -fambowl
@@ -3351,10 +3350,6 @@ sega/model2.cpp     // fvipers/b,fvipersa,scamp,sfight=nodrc only
 -powsledm
 -powsledr
 -rascot2
--topskatr
--topskatrj
--topskatru
--topskatruo
 -vonr
 
 sega/model3.cpp
