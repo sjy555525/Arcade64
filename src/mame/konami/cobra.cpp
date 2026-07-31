@@ -3252,8 +3252,42 @@ ROM_START(bujutsu)
 	ROM_REGION64_BE(0x80000, "user3", 0)        /* Gfx CPU program (PPC604) */
 	ROM_LOAD("645a03.u17", 0x00000, 0x80000, CRC(086abd0b) SHA1(24df439eb9828ed3842f43f5f4014a3fc746e1e3) )
 
-	ROM_REGION(0x2000, "m48t58", ROMREGION_ERASE00)
-	ROM_LOAD( "m48t58-70pc1.17l", 0x000000, 0x002000, NO_DUMP )
+	ROM_REGION(0x2000, "m48t58", 0)
+	ROM_LOAD( "m48t58-70pc1_ua.17l", 0x000000, 0x002000, BAD_DUMP CRC(022925bf) SHA1(8163846316152a8b305b1c5148ce1fe2671d44de) ) // hand built
+
+	DISK_REGION( "ata:0:hdd" )
+	DISK_IMAGE_READONLY( "645c04", 0, SHA1(c0aabe69f6eb4e4cf748d606ae50674297af6a04) ) // Boots as 645JAC in UA region (as opposed to 745JAA in JA/AA regions)
+ROM_END
+
+ROM_START(bujutsuj)
+	ROM_REGION64_BE(0x80000, "user1", 0)        /* Main CPU program (PPC603) */
+	ROM_LOAD("645a01.33d", 0x00000, 0x80000, CRC(cb1a8683) SHA1(77b7dece84dc17e9d63242347b7202e879b9a10e) )
+
+	ROM_REGION32_BE(0x80000, "user2", 0)        /* Sub CPU program (PPC403) */
+	ROM_LOAD("645a02.24r", 0x00000, 0x80000, CRC(7d1c31bd) SHA1(94907c4068a488a74b2fa9a486c832d380c5b184) )
+
+	ROM_REGION64_BE(0x80000, "user3", 0)        /* Gfx CPU program (PPC604) */
+	ROM_LOAD("645a03.u17", 0x00000, 0x80000, CRC(086abd0b) SHA1(24df439eb9828ed3842f43f5f4014a3fc746e1e3) )
+
+	ROM_REGION(0x2000, "m48t58", 0)
+	ROM_LOAD( "m48t58-70pc1_ja.17l", 0x000000, 0x002000, BAD_DUMP CRC(a5bc4084) SHA1(2a12cd218a89853f3fafa095ad5416fd2f51ffb5) ) // hand built
+
+	DISK_REGION( "ata:0:hdd" )
+	DISK_IMAGE_READONLY( "645c04", 0, SHA1(c0aabe69f6eb4e4cf748d606ae50674297af6a04) )
+ROM_END
+
+ROM_START(bujutsua)
+	ROM_REGION64_BE(0x80000, "user1", 0)        /* Main CPU program (PPC603) */
+	ROM_LOAD("645a01.33d", 0x00000, 0x80000, CRC(cb1a8683) SHA1(77b7dece84dc17e9d63242347b7202e879b9a10e) )
+
+	ROM_REGION32_BE(0x80000, "user2", 0)        /* Sub CPU program (PPC403) */
+	ROM_LOAD("645a02.24r", 0x00000, 0x80000, CRC(7d1c31bd) SHA1(94907c4068a488a74b2fa9a486c832d380c5b184) )
+
+	ROM_REGION64_BE(0x80000, "user3", 0)        /* Gfx CPU program (PPC604) */
+	ROM_LOAD("645a03.u17", 0x00000, 0x80000, CRC(086abd0b) SHA1(24df439eb9828ed3842f43f5f4014a3fc746e1e3) )
+
+	ROM_REGION(0x2000, "m48t58", 0)
+	ROM_LOAD( "m48t58-70pc1_aa.17l", 0x000000, 0x002000, BAD_DUMP CRC(c189211a) SHA1(83f4dbc3684e9156bcbf2397b5ecea17b3105ad3) ) // hand built
 
 	DISK_REGION( "ata:0:hdd" )
 	DISK_IMAGE_READONLY( "645c04", 0, SHA1(c0aabe69f6eb4e4cf748d606ae50674297af6a04) )
@@ -3281,5 +3315,7 @@ ROM_END
 
 /*************************************************************************/
 
-GAME( 1997, bujutsu,  0, bujutsu, cobra, cobra_state, init_bujutsu,  ROT0, "Konami", "Fighting Wu-Shu 2nd! (ver JAA)", MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_SOUND | MACHINE_IMPERFECT_TIMING )
+GAME( 1997, bujutsu,  0,       bujutsu, cobra, cobra_state, init_bujutsu,  ROT0, "Konami", "Fighting Bujutsu (ver UAC)", MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_SOUND | MACHINE_IMPERFECT_TIMING )
+GAME( 1997, bujutsuj, bujutsu, bujutsu, cobra, cobra_state, init_bujutsu,  ROT0, "Konami", "Fighting Wu-Shu 2nd! (ver JAA)", MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_SOUND | MACHINE_IMPERFECT_TIMING )
+GAME( 1997, bujutsua, bujutsu, bujutsu, cobra, cobra_state, init_bujutsu,  ROT0, "Konami", "Fighting Wu-Shu 2nd! (ver AAA)", MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_SOUND | MACHINE_IMPERFECT_TIMING )
 GAME( 1997, racjamdx, 0, cobra,   cobra, cobra_state, init_racjamdx, ROT0, "Konami", "Racing Jam DX", MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_SOUND | MACHINE_IMPERFECT_TIMING | MACHINE_NODEVICE_LAN )
