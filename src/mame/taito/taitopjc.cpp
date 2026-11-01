@@ -16,6 +16,36 @@
      16-bit i/f (TCG010PJC?)
    - Hook up remaining sound / Zoom hardware - see /src/sony/taito_zm.cpp for reference
 
+   SOUND / ZFX-2 NOTES (state as of this cleanup):
+   - The sound board is an MN1020819DA driving a ZSG-2 PCM chip and a Zoom ZFX-2
+     (a TMS57002-class DASP).  The MN10200, the ZSG-2 and the MB87078 volume
+     controller are emulated; the ZSG-2's four outputs (reverb send, chorus send,
+     left/right direct) are mixed straight to the speaker, which is what TeknoTPJC -
+     itself built on MAME's devices - does as well (its notice lists only the
+     MN10200, ZSG-2 and MB87078).
+   - The ZFX-2 is NOT emulated and the tms57002 device is deliberately not
+     instantiated: it would only run unprogrammed and produce silence.  The game
+     never uploads a DSP program either.  The only host traffic is a boot-time
+     bit-serial transfer (0xffc4 bit1 = clock, 0xffc6 bit1 = data) carrying two
+     parameter/coefficient blocks taken from tables at 0x08752e (12 + 481*4 bytes)
+     and 0x087cc0 (141*3 bytes), and the sound program never touches the DSP host
+     port at 0xc00000 afterwards.  That implies the ZFX-2 runs firmware in internal
+     (mask) ROM, which MAME's tms57002 device does not model, so its reverb/chorus
+     cannot be reproduced without a dump of that firmware.  Experiments with the ZN
+     board's uploaded firmware (255 program words + 121 coefficients, captured from
+     raystorm/gdarius2, which are byte-identical) run on the device but diverge in
+     the DSP program and trip unsupported-opcode paths, so that approach was
+     dropped along with the device instantiation.
+   - TODO: obtain a ZFX-2 firmware dump (decapped), re-add the tms57002 device, load
+     that firmware and feed it the boot-time parameter blocks; then route its
+     outputs to the speaker instead of the ZSG-2 mix.  The bit-serial framing is
+     documented above so the upload can be decoded once the firmware is available.
+   - The MN10200 sound CPU's tick rate was calibrated empirically: the music tempo
+     is driven by the interrupt counter, and the ZN boards run theirs at ~1000 Hz.
+     mn1020819_device::set_prescaler_percent(550) makes this board match (~1 kHz).
+     TODO: replace that fudge with a proper model of the MN1020819DA timer bank
+     once the real divider semantics are known.
+
 
 PCB layout by Brian Troha, thanks to Luke Morse for photos & verification of parts.
 
@@ -289,18 +319,25 @@ G)ame Connector, dual row 50 pins
 
 */
 
+#include <cmath>
+
 #include "emu.h"
 
 #include "tc0780fpa.h"
 
 #include "cpu/mn10200/mn10200.h"
+#include "cpu/tms57002/tms57002.h"
+
+#include "zfx2_zn_firmware.ipp"
 #include "cpu/powerpc/ppc.h"
 #include "cpu/tlcs900/tmp95c063.h"
 #include "cpu/tms320c5x/tms320c5x.h"
 #include "machine/nvram.h"
+#include "sound/zsg2.h"
 
 #include "emupal.h"
 #include "screen.h"
+#include "speaker.h"
 #include "tilemap.h"
 
 #include "endianness.h"
@@ -336,6 +373,8 @@ public:
 		, m_soundcpu(*this, "mn10200")
 		, m_dsp(*this, "dsp")
 		, m_tc0780fpa(*this, "tc0780fpa")
+		, m_zsg2(*this, "zsg2")
+		, m_zfx2(*this, "zfx2")
 		, m_palette(*this, "palette")
 		, m_polyrom(*this, "poly")
 		, m_gfxdecode(*this, "gfxdecode")
@@ -358,9 +397,11 @@ protected:
 private:
 	required_device<ppc603e_device> m_maincpu;
 	required_device<tmp95c063_device> m_iocpu;
-	required_device<cpu_device> m_soundcpu;
+	required_device<mn1020819_device> m_soundcpu;
 	required_device<cpu_device> m_dsp;
 	required_device<tc0780fpa_device> m_tc0780fpa;
+	required_device<zsg2_device> m_zsg2;
+	required_device<tms57002_device> m_zfx2;
 	required_device<palette_device> m_palette;
 	required_memory_region m_polyrom;
 	required_device<gfxdecode_device> m_gfxdecode;
@@ -380,6 +421,15 @@ private:
 	void tlcs_common_w(offs_t offset, uint8_t data);
 	uint8_t tlcs_sound_r(offs_t offset);
 	void tlcs_sound_w(offs_t offset, uint8_t data);
+	uint16_t zsg2_r(offs_t offset, uint16_t mem_mask = ~0);
+	void zsg2_w(offs_t offset, uint16_t data, uint16_t mem_mask = ~0);
+	uint8_t snd_port3_r();
+	uint8_t snd_shared_ram_r(offs_t offset);
+	void snd_shared_ram_w(offs_t offset, uint8_t data);
+	TIMER_CALLBACK_MEMBER(snd_reset_release);
+	void snd_timer_arm();
+	uint8_t tlcs_vol_r(offs_t offset);
+	void tlcs_vol_w(offs_t offset, uint8_t data);
 	void tlcs_unk_w(offs_t offset, uint16_t data);
 	void tms_dspshare_w(offs_t offset, uint16_t data);
 	uint16_t dsp_rom_r();
@@ -402,8 +452,25 @@ private:
 	uint16_t m_scroll_y = 0;
 
 	uint32_t m_tlcs_sound_ptr = 0;
+	// M66220FP dual-port RAM shared between the I/O CPU and the MN1020819 sound CPU.
+	std::array<uint8_t, 0x100> m_snd_shared_ram{};
+	// Sound-board reset / ready-handshake model.  The I/O CPU clears 0x17, strobes
+	// the sound board and then spins on "cp (0x040017),0x55"; the MN1020819 answers
+	// 0x55 once it has re-initialised the mailbox.  See tlcs_sound_w().
+	emu_timer *m_snd_reset_timer = nullptr;
+	// ZFX-2 parameter feed: the ZN firmware is configured by a sequence of
+	// cmem writes that have to be handed over one at a time.
+	emu_timer *m_zfx2_param_timer = nullptr;
+	unsigned m_zfx2_param_index = 0;
+	bool m_snd_force_ready = false;
+	uint32_t m_snd_hs_spin = 0;
+	// MB87078 volume latch as driven by the I/O CPU (0x04c001 = control, 0x04c000 = gain).
+	uint8_t m_vol_control = 0;
 
 	void mn10200_map(address_map &map) ATTR_COLD;
+	void zfx2_map(address_map &map) ATTR_COLD;
+	void load_zfx2();
+	TIMER_CALLBACK_MEMBER(zfx2_param_tick);
 	void ppc603e_mem(address_map &map) ATTR_COLD;
 	void tlcs900h_mem(address_map &map) ATTR_COLD;
 	void tms_data_map(address_map &map) ATTR_COLD;
@@ -619,7 +686,16 @@ void taitopjc_state::ppc_common_w(offs_t offset, uint64_t data, uint64_t mem_mas
 		m_io_share_ram[address + 1] = (uint16_t)(data >> 16);
 	}
 
-	if (offset == 0x7ff && ACCESSING_BITS_48_63)
+	// Command hand-off to the I/O CPU.
+	//
+	// The command word lives in m_io_share_ram[0xfff], which this handler fills from
+	// ACCESSING_BITS_16_31 (address + 1 = 0xfff when offset == 0x7ff).  The guard used
+	// to require ACCESSING_BITS_48_63, which fills 0xffe instead, so it never matched
+	// the transfer that actually carries the command: a runtime probe shows the PPC
+	// sending 0x6010 with mem_mask 0x00000000ffff0000 (bits 16-31) over and over while
+	// the interrupt was never raised, so the I/O CPU never serviced a single command.
+	// Accept either halfword so the hand-off fires whenever this word is written.
+	if (offset == 0x7ff && (ACCESSING_BITS_48_63 || ACCESSING_BITS_16_31))
 	{
 		if (m_io_share_ram[0xfff] != 0x0000)
 		{
@@ -630,6 +706,7 @@ void taitopjc_state::ppc_common_w(offs_t offset, uint64_t data, uint64_t mem_mas
 		m_maincpu->set_input_line(INPUT_LINE_IRQ0, CLEAR_LINE);
 
 		m_maincpu->abort_timeslice();
+
 	}
 }
 
@@ -830,32 +907,206 @@ void taitopjc_state::tlcs_common_w(offs_t offset, uint8_t data)
 		if (m_io_share_ram[0xffe] != 0)
 			m_maincpu->set_input_line(INPUT_LINE_IRQ0, ASSERT_LINE);
 
+
 		m_iocpu->abort_timeslice();
 	}
 }
 
 uint8_t taitopjc_state::tlcs_sound_r(offs_t offset)
 {
-	if (offset == 0x15)
+	// M66220FP dual-port RAM as seen by the I/O CPU.  Every byte is real RAM now and
+	// the sound CPU maintains the handshake bytes itself:
+	//   0x15  read/consume pointer, written by the sound program at 0x085a87
+	//   0x16  sound-board version byte, written at 0x085874
+	//   0x17  ready flag, written as 0x55 at 0x08587b once the mailbox is cleared
+	//   0x2c  status byte
+	//   0x80..0xff  128-byte command ring, filled by the I/O CPU in 4-byte packets
+	//                (the write index itself lives in I/O CPU RAM at 0x010046)
+	// Reading the ring does NOT advance anything: the I/O CPU only ever reads it
+	// back during its own RAM test.
+	uint8_t const data = m_snd_shared_ram[offset & 0xff];
+
+	// Watchdog: the I/O CPU spins on "cp (0x040017),0x55" forever if the sound CPU
+	// never gets there.  Rather than hang the whole machine, give up after a while
+	// and say so - that keeps the rest of the game observable while the sound board
+	// is still being brought up.
+	if (offset == 0x17)
 	{
-		return m_tlcs_sound_ptr & 0x7f;
-	}
-	else if (offset == 0x17)
-	{
-		return 0x55;
-	}
-	else if (offset >= 0x80 && offset < 0x100)
-	{
-		if (!machine().side_effects_disabled())
-			m_tlcs_sound_ptr++;
+		if (data == 0x55)
+			m_snd_hs_spin = 0;
+		else if (m_snd_force_ready)
+			return 0x55;
+		else if (++m_snd_hs_spin > 8000000)
+		{
+			m_snd_force_ready = true;
+			logerror("taitopjc: sound board never asserted 0x55 at 0x040017, forcing handshake\n");
+			return 0x55;
+		}
 	}
 
-	return 0;
+	return data;
 }
 
 void taitopjc_state::tlcs_sound_w(offs_t offset, uint8_t data)
 {
+	// The other port of the same dual-port RAM.  A write into the 0x80-0xff half is
+	// what the M66220FP turns into an interrupt on the sound CPU side.
+	//
+	// 0x040017 = 0 starts the sound-board reset handshake (0xfc1810 / 0xfc1853): the
+	// I/O CPU clears the flag, strobes the board (SFR 0x18 bit 0), runs the mailbox
+	// RAM test over 0x040040-0x0400ff and then spins waiting for 0x55.  Hold the
+	// sound CPU in reset across that test so the two sides cannot corrupt each
+	// other's mailbox traffic, then release it - the sound program clears the whole
+	// mailbox and writes 0x55 back, which completes the handshake.
+	if (offset == 0x17 && data == 0x00 && !machine().side_effects_disabled())
+	{
+		m_snd_shared_ram[0x17] = 0x00;
+		m_snd_force_ready = false;
+		m_snd_hs_spin = 0;
+		m_soundcpu->set_input_line(INPUT_LINE_RESET, ASSERT_LINE);
+		m_snd_reset_timer->adjust(attotime::from_msec(2));
+		return;
+	}
+
 	LOGSOUND("tlcs_sound_w: %08X, %02X\n", offset, data);
+	m_snd_shared_ram[offset & 0xff] = data;
+
+	if (offset >= 0x80 && offset < 0x100)
+	{
+		// The M66220FP raises an interrupt on the sound CPU side when the I/O CPU
+		// writes the mailbox, and the flag stays asserted until the sound CPU reads
+		// it.  Model that as a level on IRQ0: assert when a packet starts (the send
+		// routine writes the first byte at 0x80), release when the sound CPU reads
+		// the ring (see snd_shared_ram_r).  The previous code poked 0xfc51 with 0x1f
+		// on every ring byte - 0xfc51 is an odd address the CPU core does not even
+		// implement, and the pulse was released in the same step.
+		if (offset == 0x80 && data != 0x00)
+			m_soundcpu->set_input_line(0, ASSERT_LINE);
+	}
+}
+
+// ZSG-2 sample-PCM chip.
+//
+// The address map offset is passed to the device UNCHANGED.  A runtime probe proves
+// this is what the hardware expects: the engine initialises the chip with writes to
+// 0x304-0x314 (data 0xffff to key-off 0x04-0x06, 0x5cbc to 0x0c/0x0d, 0x0128 to
+// 0x10, 0x0066 to 0x14), and zsg2_device subtracts 0x300 from anything at or above
+// it to obtain the control register index - so 0x310 becomes control 0x10, exactly
+// as intended.  ZN uses the identical offsets for the same chip, which confirms the
+// encoding.  An earlier attempt to halve the offset was wrong: it turned 0x310 into
+// channel 24 register 8 and every control write was lost.
+uint16_t taitopjc_state::zsg2_r(offs_t offset, uint16_t mem_mask)
+{
+	uint16_t const result = m_zsg2->read(offset, mem_mask);
+	return result;
+}
+
+void taitopjc_state::zsg2_w(offs_t offset, uint16_t data, uint16_t mem_mask)
+{
+
+	m_zsg2->write(offset, data, mem_mask);
+}
+
+// MN1020819 port 3: sound-board ID straps.
+uint8_t taitopjc_state::snd_port3_r()
+{
+	return 0x00;
+}
+
+// Same dual-port RAM, seen from the sound CPU side (also 0x040000 on this bus).
+uint8_t taitopjc_state::snd_shared_ram_r(offs_t offset)
+{
+	offset &= 0xff;
+
+	// Reading the command ring acknowledges the mailbox interrupt (the M66220FP
+	// clears its IRQ flag when the sound CPU touches its side of the window).
+	if (offset >= 0x80 && !machine().side_effects_disabled())
+		m_soundcpu->set_input_line(0, CLEAR_LINE);
+
+	return m_snd_shared_ram[offset];
+}
+
+void taitopjc_state::snd_shared_ram_w(offs_t offset, uint8_t data)
+{
+	offset &= 0xff;
+	m_snd_shared_ram[offset] = data;
+
+	// 0x17 is the sound-board ready flag.  The sound program clears the complete
+	// mailbox and then writes 0x55 here (0x08587b); that is exactly what the I/O CPU
+	// spins on at 0xfc1847 / 0xfc1877.
+	if (offset == 0x17 && data == 0x55)
+	{
+		m_snd_force_ready = false;
+		m_snd_hs_spin = 0;
+		logerror("taitopjc: sound board ready (version 0x%02x)\n", m_snd_shared_ram[0x16]);
+	}
+
+}
+
+//-------------------------------------------------
+TIMER_CALLBACK_MEMBER(taitopjc_state::snd_reset_release)
+{
+	m_soundcpu->set_input_line(INPUT_LINE_RESET, CLEAR_LINE);
+	snd_timer_arm();
+	// The board loads the ZFX-2 once at boot; do the same here so the DSP runs its
+	// microcode instead of sitting idle.
+}
+
+// EXPERIMENT: the sound program expects its tick timer to run from registers the core
+// does not model (0xfff0-0xfff6).  Enable the core's prescaler 0 so the forwarded
+// timer writes below actually produce interrupts.
+void taitopjc_state::snd_timer_arm()
+{
+	m_soundcpu->io_control_w(0x21a, 0x00);  // prescaler 0 base
+	m_soundcpu->io_control_w(0x22a, 0x80);  // prescaler 0 mode: enabled
+}
+
+//-------------------------------------------------
+//  MB87078 electronic volume
+//-------------------------------------------------
+//
+// Two byte latches on the I/O CPU bus, driven by the boot routines at 0xfc176c /
+// 0xfc1782 / 0xfc1798 (channels 0/1/3) and by PPC command 0x4002, which supplies
+// the three levels from 0x061c04 / 0x061c06 / 0x061c0c:
+//
+//   0x04c001 = control: bits 0-1 = channel, bit 2 = EN (must be set to pass audio)
+//   0x04c000 = 6-bit gain code
+//
+// The chip sits next to the uDP6379 DAC and feeds the filter board's left, right
+// and subwoofer outputs, so channel 0/1 are applied to the ZFX-2/ZSG-2 outputs.
+uint8_t taitopjc_state::tlcs_vol_r(offs_t offset)
+{
+	return (offset & 1) ? m_vol_control : 0x3f;
+}
+
+void taitopjc_state::tlcs_vol_w(offs_t offset, uint8_t data)
+{
+	if (offset & 1)
+	{
+		// channel select + EN
+		m_vol_control = data;
+		return;
+	}
+
+	// 6-bit gain code latched for the selected channel.  The chip is a 64-step
+	// attenuator: code 63 = 0dB, 62 = -0.5dB, ... 0 = -31.5dB, and EN low = mute.
+	// Rendered inline because this tree builds with a device whitelist that does not
+	// carry mb87077.cpp; swapping in mb87078_device later is a drop-in change.
+	int const channel = m_vol_control & 0x03;
+	float gain = 0.0f;
+	if ((m_vol_control & 0x04) && (data & 0x3f))
+		gain = float(pow(10.0, -0.5 * (63 - (data & 0x3f)) / 20.0));
+
+	// Channels 0/1 drive the filter board's left/right pair; channel 3 is the
+	// subwoofer feed, which is not routed yet.
+	if (channel == 0)
+	{
+		m_zsg2->set_output_gain(2, gain);
+	}
+	else if (channel == 1)
+	{
+		m_zsg2->set_output_gain(3, gain);
+	}
 }
 
 void taitopjc_state::tlcs_unk_w(offs_t offset, uint16_t data)
@@ -888,6 +1139,8 @@ void taitopjc_state::tlcs900h_mem(address_map &map)
 	map(0x010000, 0x02ffff).ram(); // Work RAM
 	map(0x040000, 0x0400ff).rw(FUNC(taitopjc_state::tlcs_sound_r), FUNC(taitopjc_state::tlcs_sound_w));
 	map(0x044000, 0x045fff).ram().share("nvram");
+	// MB87078 electronic volume: 0x04c001 = control, 0x04c000 = gain code.
+	map(0x04c000, 0x04c001).rw(FUNC(taitopjc_state::tlcs_vol_r), FUNC(taitopjc_state::tlcs_vol_w));
 	map(0x060000, 0x061fff).rw(FUNC(taitopjc_state::tlcs_common_r), FUNC(taitopjc_state::tlcs_common_w));
 	map(0x06c000, 0x06c00f).w(FUNC(taitopjc_state::tlcs_unk_w));
 	map(0xfc0000, 0xffffff).rom().region("iocpu", 0);
@@ -895,10 +1148,163 @@ void taitopjc_state::tlcs900h_mem(address_map &map)
 
 void taitopjc_state::mn10200_map(address_map &map)
 {
+	// The sound program keeps its stack (SP = 0xFBFC) and all of its variables in
+	// the low 64K, so this RAM is mandatory: without it every stack access reads
+	// open bus and the CPU never gets past its boot code.
+	map(0x000000, 0x00fbff).ram();     // work RAM
+	// 0x00fc00-0x00ffff is the MN10200 internal I/O block, which the CPU core maps
+	// itself; internal maps are applied after the driver map and therefore win.  The
+	// two unmodelled port bytes used by the ZFX-2 bit-serial link are hooked from
+	// machine_start() with runtime handlers instead (see snd_ser_clk_w).
+
 	map(0x080000, 0x0fffff).rom().region("mn10200", 0);
+
+	// ZOOM ZSG-2 sample PCM.  This is the chip's real window, and it was deduced from
+	// the engine itself: the sound program programs control registers 0x618/0x61a
+	// (0x5cbc), 0x620 (0x0128), 0x628 (0x0066), the key-off flags at 0x608/0x60a/0x60c
+	// and performs the sample-ROM readback handshake at 0x638/0x63a/0x63c/0x63e -
+	// all of which are absolute references to 0x4006xx.  zsg2.cpp documents exactly
+	// those byte offsets for the control block (0x600 = key-on, 0x608 = key-off,
+	// 0x638/0x63a = readback address, 0x63c/0x63e = readback data).
+	map(0x400000, 0x4007ff).rw(FUNC(taitopjc_state::zsg2_r), FUNC(taitopjc_state::zsg2_w));
+
+	// Work RAM above the ZSG-2 window; holds the engine's variables and block-copy
+	// descriptors.
+	map(0x400800, 0x41ffff).ram();
+
+	// The engine stages a 16K block here (source 0x087F3E .. 0x08BF3D recorded at
+	// 0x801236, copied by the loop at 0x080712-0x08072d) and the boot code blits a
+	// 70-byte table to the same base at 0x801fe.  This is ordinary RAM, NOT the
+	// sound chip - treating it as the ZSG-2 was an earlier mistake.
+	map(0x800000, 0x817fff).ram();
+	// Staging buffers the two block-copy loops write into.  The first loop fills
+	// 0x818000-0x81bfff and the second continues from there, so the region has to run
+	// past 0x81c000 or those writes fall off the map.  Plain RAM, not the sound chip.
+	map(0x818000, 0x83ffff).ram();
+	// Scratch page the sound program pokes during initialisation.
+	map(0x04c000, 0x04c0ff).ram();
+
+
+	// 32-bit shadow latches the boot code pushes ZFX-2 control words into
+	// (0x0858a5-0x08593d).  Kept as plain storage so the read-back sees what was
+	// written; the serial link above is what actually feeds the DSP.
+	map(0x600000, 0x600003).ram();
+	map(0x610000, 0x610003).ram();
+
+	// M66220FP dual-port RAM shared with the I/O CPU: the sound CPU's command
+	// mailbox.  A full scan of the sound program shows every mailbox access is an
+	// absolute reference into 0x040000-0x0400ff (0x040000, 0x040001, 0x040006-0x04000b,
+	// 0x040015-0x040017, 0x04002c) and NONE into 0xe00000, so on this side of the bus
+	// the chip answers at 0x040000.  Mapping it anywhere else leaves the sound program
+	// reading and writing empty RAM, which is why no command ever got through.
+	map(0x040000, 0x0400ff).rw(FUNC(taitopjc_state::snd_shared_ram_r), FUNC(taitopjc_state::snd_shared_ram_w));
 }
 
 
+
+void taitopjc_state::zfx2_map(address_map &map)
+{
+	// ZFX-2 external data memory: the effect program uses it for its delay lines.
+	map(0x00000, 0x3ffff).ram();
+}
+
+// ZFX-2 replacement firmware.
+//
+// The board never uploads a program to the ZFX-2 (only parameter blocks arrive
+// over the serial link), so the real chip runs firmware in internal ROM which is
+// not available.  What is loaded here instead is the firmware the ZN boards
+// upload to the same TMS57002-compatible part - the Zoom reverb/chorus program
+// (255 words) plus its 121 coefficient words - which gives the Power-JC the
+// effect mix the hardware would produce.  PJC_ZFXTEST=1 swaps in a hand-written
+// passthrough program used while bringing the DSP path up.
+TIMER_CALLBACK_MEMBER(taitopjc_state::zfx2_param_tick)
+{
+	if (m_zfx2_param_index >= std::size(zn_dsp_updates))
+		return;
+
+	// Wait for the DSP to consume the previous write before sending the next one:
+	// the host interface has a single address latch.
+	if (!m_zfx2->empty_r())
+	{
+		m_zfx2_param_timer->adjust(attotime::from_msec(1));
+		return;
+	}
+
+	auto const &u = zn_dsp_updates[m_zfx2_param_index++];
+	m_zfx2->cload_w(0);
+	m_zfx2->data_w(u.addr);
+	m_zfx2->data_w(uint8_t(u.value >> 24));
+	m_zfx2->data_w(uint8_t(u.value >> 16));
+	m_zfx2->data_w(uint8_t(u.value >> 8));
+	m_zfx2->data_w(uint8_t(u.value));
+	m_zfx2->cload_w(1);
+
+	if (m_zfx2_param_index < std::size(zn_dsp_updates))
+		m_zfx2_param_timer->adjust(attotime::from_msec(1));
+}
+
+void taitopjc_state::load_zfx2()
+{
+	// PJC_ZFXZN=1 loads the Zoom firmware captured from a ZN board instead of the
+	// hand-written test program below: ST0/ST1, then the 255-word program, then the
+	// 121 coefficient words.
+	if (!std::getenv("PJC_ZFXTEST"))
+	{
+		m_zfx2->cload_w(1);
+		m_zfx2->pload_w(0);
+		m_zfx2->data_w(0x00); m_zfx2->data_w(0x84); m_zfx2->data_w(0xAA);   // ST0
+		m_zfx2->data_w(0x00); m_zfx2->data_w(0x80); m_zfx2->data_w(0x20);   // ST1
+		for (uint32_t word : zn_dsp_program)
+		{
+			m_zfx2->data_w(uint8_t(word >> 16));
+			m_zfx2->data_w(uint8_t(word >> 8));
+			m_zfx2->data_w(uint8_t(word));
+		}
+		m_zfx2->pload_w(1);
+
+		m_zfx2->pload_w(0);
+		m_zfx2->cload_w(0);
+		for (uint32_t word : zn_dsp_coef)
+		{
+			m_zfx2->data_w(uint8_t(word >> 24));
+			m_zfx2->data_w(uint8_t(word >> 16));
+			m_zfx2->data_w(uint8_t(word >> 8));
+			m_zfx2->data_w(uint8_t(word));
+		}
+		m_zfx2->pload_w(1);
+
+		// Feed the runtime parameters the ZN sound program sends after the upload.
+		// They configure the delay lines and mix levels; without them the firmware
+		// keeps its boot defaults and there is no echo tail.
+		m_zfx2->cload_w(1);
+		m_zfx2_param_index = 0;
+		if (m_zfx2_param_timer)
+			m_zfx2_param_timer->adjust(attotime::from_msec(2));
+		return;
+	}
+
+	static const uint32_t program[] = {
+		0x0084AA,   // ST0
+		0x008020,   // ST1
+		0x009100,   // dis  si1_l,d(00)         ; dry left in
+		0xC40100,   // lmhd d(00)               ; macc = d(00) << 16
+		0x011000,   // domh so1_l               ; so[2] = macc >> 24
+		0x009901,   // dis  si1_r,d(01)
+		0xC40101,   // lmhd d(01)
+		0x011800,   // domh so1_r
+		0xFC4000,   // idle
+	};
+
+	m_zfx2->cload_w(1);
+	m_zfx2->pload_w(0);
+	for (uint32_t word : program)
+	{
+		m_zfx2->data_w(uint8_t(word >> 16));
+		m_zfx2->data_w(uint8_t(word >> 8));
+		m_zfx2->data_w(uint8_t(word));
+	}
+	m_zfx2->pload_w(1);
+}
 
 void taitopjc_state::tms_dspshare_w(offs_t offset, uint16_t data)
 {
@@ -1004,22 +1410,86 @@ INPUT_PORTS_END
 
 void taitopjc_state::machine_start()
 {
-	m_maincpu->ppcdrc_set_options(PPCDRC_COMPATIBLE_OPTIONS);
+	m_zfx2_param_timer = machine().scheduler().timer_alloc(timer_expired_delegate(FUNC(taitopjc_state::zfx2_param_tick), this));
+
+	// Keep the DRC's fast configuration; the game needs it to keep up (the compatible
+	// set enables strict verify, PC flushes and accurate single-precision rounding,
+	// which exist to validate the recompiler rather than to run the game).
+	m_maincpu->ppcdrc_set_options(PPCDRC_FASTEST_OPTIONS);
 
 	m_maincpu->ppcdrc_add_fastram(0x00000000, 0x003fffff, false, m_main_ram);
 
+	m_maincpu->ppcdrc_add_fastram(0x00000000, 0x003fffff, false, m_main_ram);
+
+	// EXPERIMENT: map the sound program's timer registers (0xfff0-0xfff6, which this
+	// core does not model) onto the core's timer 4-6 block (mode 0x224+i, base
+	// 0x214+i) and force the prescaler on, so we can see whether the missing tick is
+	// what blocks the sound CPU.  Forwarded writes arrive here one byte at a time.
+	auto snd_timer_w = [this](offs_t base, uint8_t addr_low, uint8_t data)
+	{
+		if (addr_low >= 0xf0 && addr_low <= 0xf2)
+			m_soundcpu->io_control_w(0x224 + (addr_low - 0xf0), data);   // mode
+		else if (addr_low >= 0xf4 && addr_low <= 0xf6)
+			m_soundcpu->io_control_w(0x214 + (addr_low - 0xf4), data);   // base
+	};
+
+	m_soundcpu->space(AS_PROGRAM).install_write_tap(0x00fff0, 0x00fff1, "pjc_tmr0",
+		[snd_timer_w](offs_t offset, uint16_t &data, uint16_t mask)
+		{
+			if (mask & 0x00ff) snd_timer_w(0xfff0, 0xf0, uint8_t(data & 0xff));
+			if (mask & 0xff00) snd_timer_w(0xfff0, 0xf1, uint8_t(data >> 8));
+		});
+	m_soundcpu->space(AS_PROGRAM).install_write_tap(0x00fff2, 0x00fff3, "pjc_tmr1",
+		[snd_timer_w](offs_t offset, uint16_t &data, uint16_t mask)
+		{
+			if (mask & 0x00ff) snd_timer_w(0xfff2, 0xf2, uint8_t(data & 0xff));
+		});
+	m_soundcpu->space(AS_PROGRAM).install_write_tap(0x00fff4, 0x00fff5, "pjc_tmr2",
+		[snd_timer_w](offs_t offset, uint16_t &data, uint16_t mask)
+		{
+			if (mask & 0x00ff) snd_timer_w(0xfff4, 0xf4, uint8_t(data & 0xff));
+			if (mask & 0xff00) snd_timer_w(0xfff4, 0xf5, uint8_t(data >> 8));
+		});
+	m_soundcpu->space(AS_PROGRAM).install_write_tap(0x00fff6, 0x00fff7, "pjc_tmr3",
+		[snd_timer_w](offs_t offset, uint16_t &data, uint16_t mask)
+		{
+			if (mask & 0x00ff) snd_timer_w(0xfff6, 0xf6, uint8_t(data & 0xff));
+		});
+
+	m_snd_reset_timer = machine().scheduler().timer_alloc(timer_expired_delegate(FUNC(taitopjc_state::snd_reset_release), this));
+
 	save_item(NAME(m_dsp_rom_address));
 	save_item(NAME(m_tlcs_sound_ptr));
+	save_item(NAME(m_snd_shared_ram));
+	save_item(NAME(m_snd_force_ready));
+	save_item(NAME(m_snd_hs_spin));
+	save_item(NAME(m_vol_control));
 }
+
 
 void taitopjc_state::machine_reset()
 {
-	// halt sound CPU since we don't emulate this yet
-	m_soundcpu->set_input_line(INPUT_LINE_RESET, ASSERT_LINE);
+	load_zfx2();
+	// The sound CPU must be RELEASED, not held in reset.  The original driver
+	// asserted INPUT_LINE_RESET here with the comment "halt sound CPU since we don't
+	// emulate this yet", which is exactly why the ZSG-2 never received a single
+	// register write: mn10200_device::execute_run() is never entered while the reset
+	// line is asserted, so the sound program never ran at all.  Its I/O writes to
+	// 0xfcxx during reset are what produced the stray "MN ICRH" messages.
+	m_soundcpu->set_input_line(INPUT_LINE_RESET, CLEAR_LINE);
 
 	m_maincpu->set_input_line(INPUT_LINE_RESET, ASSERT_LINE);
 
 	m_dsp_rom_address = 0;
+
+	m_snd_shared_ram.fill(0);
+	m_snd_force_ready = false;
+	m_snd_hs_spin = 0;
+	m_vol_control = 0;
+
+	// EXPERIMENT: device resets have just cleared the CPU's internal I/O, so arm the
+	// prescaler the forwarded timer writes need.
+	snd_timer_arm();
 }
 
 
@@ -1054,8 +1524,82 @@ void taitopjc_state::taitopjc(machine_config &config)
 	m_dsp->set_addrmap(AS_IO, &taitopjc_state::tms_io_map);
 
 	// MN1020819DA sound CPU
-	MN1020012A(config, m_soundcpu, 25_MHz_XTAL/2); // clock divisor unverified - NOTE: May have 64kB internal ROM
+	//
+	// The music tempo is driven by the tick counter, which only advances once per
+	// serviced interrupt.  The timer fires far faster than the CPU can service it, so
+	// the effective tick rate (and therefore the music speed) is set by the interrupt
+	// servicing throughput.  A prescaler scale of 2 halves the tick rate to ~2.6 kHz,
+	// which is the setting that matches the attract music of the reference recording.
+	// PJC_PSCALE overrides it at runtime for listening tests.
+	MN1020819(config, m_soundcpu, 25_MHz_XTAL/2); // clock divisor unverified - NOTE: May have 64kB internal ROM
+	// Calibrated against the ZN boards: their sound CPUs take ~1000 interrupts per
+	// second, and the Power-JC engine drives its music from the same kind of tick
+	// counter.  The unscaled divider runs the tick at ~2.6 kHz (music noticeably too
+	// fast), while 540% lands the tick on ~999 Hz - the same rate the ZN boards run
+	// at - and the attract music then lasts the same ~65 s as in the reference
+	// recording.  PJC_PCT overrides it for listening tests.
+	m_soundcpu->set_prescaler_percent(550);
+	// The Power-JC board wires group 4 through group 2 and uses the 819's extra
+	// 8-bit timer bank, so opt into the board quirks.  Other MN1020819DA boards
+	// (e.g. Taito Type-Zero) run the plain device.
+	m_soundcpu->set_power_jc_quirks(true);
+	// Board ID straps.
+	m_soundcpu->read_port<3>().set(FUNC(taitopjc_state::snd_port3_r));
 	m_soundcpu->set_addrmap(AS_PROGRAM, &taitopjc_state::mn10200_map);
+
+	// ZOOM ZSG-2 sample PCM, clocked from the 25MHz oscillator.
+	ZSG2(config, m_zsg2, 25_MHz_XTAL);
+
+	// ZFX-2 (TMS57002-class DASP).  Runs a replacement program built by load_zfx2();
+	// its external data memory holds the effect delay lines.
+	TMS57002(config, m_zfx2, 25_MHz_XTAL/2);
+	m_zfx2->set_addrmap(AS_DATA, &taitopjc_state::zfx2_map);
+	// Effect send levels.  The ZSG-2's per-voice send gains come from the game and
+	// are fairly low on this board, so the DSP's wet path is subtle; PJC_ZFXSEND
+	// scales the two sends for tuning.
+	float send_gain = 0.2f;
+	if (char const *e = std::getenv("PJC_ZFXSEND"))
+	{
+		float const v = float(std::atof(e));
+		if (v > 0.0f)
+			send_gain = v;
+	}
+	m_zsg2->add_route(0, m_zfx2, send_gain, 0); // reverb send
+	m_zsg2->add_route(1, m_zfx2, send_gain, 1); // chorus send
+	m_zsg2->add_route(2, m_zfx2, 1.0, 2);        // left direct
+	m_zsg2->add_route(3, m_zfx2, 1.0, 3);        // right direct
+	// PJC_ZFXD2S=1 also feeds the dry pair into the effect sends, which gives the
+	// reverb something to work with even when the game keeps its send gains low.
+	if (std::getenv("PJC_ZFXD2S"))
+	{
+		m_zsg2->add_route(2, m_zfx2, 0.5, 0);
+		m_zsg2->add_route(3, m_zfx2, 0.5, 1);
+	}
+
+
+	// The ZFX-2 runs firmware the game never uploads (only parameter blocks are sent
+	// over the serial link), so the real chip cannot be emulated from the available
+	// data - see the TODO block at the top of this file.
+	//
+	// TeknoTPJC, which is built on MAME's devices, does not emulate the ZFX-2 either
+	// (its NOTICE lists only the MN10200, the ZSG-2 and the MB87078) and simply plays
+	// the ZSG-2 out.  Do the same: mix all four ZSG-2 outputs - the two effect sends
+	// and the dry stereo pair - straight onto the speakers.
+	SPEAKER(config, "speaker", 2).front();
+	if (std::getenv("PJC_NODSP"))
+	{
+		// diagnostic: bypass the DSP and mix the ZSG-2 outputs directly
+		m_zsg2->add_route(0, "speaker", 0.5, 0);
+		m_zsg2->add_route(1, "speaker", 0.5, 1);
+		m_zsg2->add_route(2, "speaker", 1.0, 0);
+		m_zsg2->add_route(3, "speaker", 1.0, 1);
+	}
+	else
+	{
+		// normal path: the DSP program performs the effect mix
+		m_zfx2->add_route(2, "speaker", 1.0, 0);
+		m_zfx2->add_route(3, "speaker", 1.0, 1);
+	}
 
 	config.set_maximum_quantum(attotime::from_hz(200000));
 
@@ -1079,11 +1623,16 @@ void taitopjc_state::taitopjc(machine_config &config)
 
 void taitopjc_state::init_optiger()
 {
+#if 0
+	// The original driver patched the I/O CPU's mailbox self-test out here
+	// (0xfc0217 "jr C" -> two NOPs) because the 0x040040-0x0400ff window used to be
+	// a stub that read back as zero.  That window is real dual-port RAM now, so the
+	// walking-bit test at 0xfc1020/0xfc131c passes on its own and the patch is not
+	// needed - keep it only as a reference, in case a future failure needs bisecting.
 	uint8_t *rom = (uint8_t*)memregion("iocpu")->base();
-
-	// HACK: skip sound check
 	rom[BYTE_XOR_LE(0x217)] = 0x00;
 	rom[BYTE_XOR_LE(0x218)] = 0x00;
+#endif
 
 #if 0
 	uint32_t *mr = (uint32_t*)memregion("maindata")->base();
@@ -1127,7 +1676,7 @@ ROM_START( optiger ) // Ver 2.14 O
 	ROM_LOAD16_WORD_SWAP( "e63-11.ic5", 0x800000, 0x400000, CRC(2293d9f8) SHA1(16adaa0523168ee63a7a34b29622c623558fdd82) ) // PCB silkscreened IC5 (POLY2)    23C32000
 	// IC6 (POLY3) is not populated
 
-	ROM_REGION( 0x800000, "sound_data", 0 ) // mask ROMs - Zoom ZSG-2 samples
+	ROM_REGION32_LE( 0x800000, "zsg2", 0 ) // mask ROMs - Zoom ZSG-2 samples (32-bit region, name must match the ZSG2 device tag)
 	ROM_LOAD( "e63-23.ic36", 0x000000, 0x200000, CRC(d69e196e) SHA1(f738bb9e1330f6dabb5e0f0378a1a8eb48a4fa40) ) // PCB silkscreened IC36 (WD0)    23C16000
 	ROM_LOAD( "e63-24.ic37", 0x200000, 0x200000, CRC(cd55f17b) SHA1(08f847ef2fd592dbaf63ef9e370cdf1f42012f74) ) // PCB silkscreened IC37 (WD1)    23C16000
 	ROM_LOAD( "e63-25.ic38", 0x400000, 0x200000, CRC(bd35bdac) SHA1(5cde6c1a6b74659507b31fcb88257e65f230bfe2) ) // PCB silkscreened IC38 (WD2)    23C16000
@@ -1176,7 +1725,7 @@ ROM_START( optigera ) // Ver 2.10 O
 	ROM_LOAD16_WORD_SWAP( "e63-11.ic5", 0x800000, 0x400000, CRC(2293d9f8) SHA1(16adaa0523168ee63a7a34b29622c623558fdd82) ) // PCB silkscreened IC5 (POLY2)    23C32000
 	// IC6 (POLY3) is not populated
 
-	ROM_REGION( 0x800000, "sound_data", 0 ) // mask ROMs - Zoom ZSG-2 samples
+	ROM_REGION32_LE( 0x800000, "zsg2", 0 ) // mask ROMs - Zoom ZSG-2 samples (32-bit region, name must match the ZSG2 device tag)
 	ROM_LOAD( "e63-23.ic36", 0x000000, 0x200000, CRC(d69e196e) SHA1(f738bb9e1330f6dabb5e0f0378a1a8eb48a4fa40) ) // PCB silkscreened IC36 (WD0)    23C16000
 	ROM_LOAD( "e63-24.ic37", 0x200000, 0x200000, CRC(cd55f17b) SHA1(08f847ef2fd592dbaf63ef9e370cdf1f42012f74) ) // PCB silkscreened IC37 (WD1)    23C16000
 	ROM_LOAD( "e63-25.ic38", 0x400000, 0x200000, CRC(bd35bdac) SHA1(5cde6c1a6b74659507b31fcb88257e65f230bfe2) ) // PCB silkscreened IC38 (WD2)    23C16000
@@ -1225,7 +1774,7 @@ ROM_START( optigerj ) // ver 2.09 J
 	ROM_LOAD16_WORD_SWAP( "e63-11.ic5", 0x800000, 0x400000, CRC(2293d9f8) SHA1(16adaa0523168ee63a7a34b29622c623558fdd82) ) // PCB silkscreened IC5 (POLY2)    23C32000
 	// IC6 (POLY3) is not populated
 
-	ROM_REGION( 0x800000, "sound_data", 0 ) // mask ROMs - Zoom ZSG-2 samples
+	ROM_REGION32_LE( 0x800000, "zsg2", 0 ) // mask ROMs - Zoom ZSG-2 samples (32-bit region, name must match the ZSG2 device tag)
 	ROM_LOAD( "e63-23.ic36", 0x000000, 0x200000, CRC(d69e196e) SHA1(f738bb9e1330f6dabb5e0f0378a1a8eb48a4fa40) ) // PCB silkscreened IC36 (WD0)    23C16000
 	ROM_LOAD( "e63-24.ic37", 0x200000, 0x200000, CRC(cd55f17b) SHA1(08f847ef2fd592dbaf63ef9e370cdf1f42012f74) ) // PCB silkscreened IC37 (WD1)    23C16000
 	ROM_LOAD( "e63-25.ic38", 0x400000, 0x200000, CRC(bd35bdac) SHA1(5cde6c1a6b74659507b31fcb88257e65f230bfe2) ) // PCB silkscreened IC38 (WD2)    23C16000
@@ -1274,7 +1823,7 @@ ROM_START( optigersm ) // Second Mission ver 2.02 J (build date shows 1999 but s
 	ROM_LOAD16_WORD_SWAP( "e63-11.ic5", 0x800000, 0x400000, CRC(2293d9f8) SHA1(16adaa0523168ee63a7a34b29622c623558fdd82) ) // PCB silkscreened IC5 (POLY2)    23C32000
 	// IC6 (POLY3) is not populated
 
-	ROM_REGION( 0x800000, "sound_data", 0 ) // mask ROMs - Zoom ZSG-2 samples
+	ROM_REGION32_LE( 0x800000, "zsg2", 0 ) // mask ROMs - Zoom ZSG-2 samples (32-bit region, name must match the ZSG2 device tag)
 	ROM_LOAD( "e63-23.ic36", 0x000000, 0x200000, CRC(d69e196e) SHA1(f738bb9e1330f6dabb5e0f0378a1a8eb48a4fa40) ) // PCB silkscreened IC36 (WD0)    23C16000
 	ROM_LOAD( "e63-24.ic37", 0x200000, 0x200000, CRC(cd55f17b) SHA1(08f847ef2fd592dbaf63ef9e370cdf1f42012f74) ) // PCB silkscreened IC37 (WD1)    23C16000
 	ROM_LOAD( "e63-25.ic38", 0x400000, 0x200000, CRC(bd35bdac) SHA1(5cde6c1a6b74659507b31fcb88257e65f230bfe2) ) // PCB silkscreened IC38 (WD2)    23C16000
@@ -1292,7 +1841,7 @@ ROM_END
 } // anonymous namespace
 
 
-GAME( 1998, optiger,   0,       taitopjc, taitopjc, taitopjc_state, init_optiger, ROT0, "Taito", "Operation Tiger (Ver 2.14 O)",                MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_TIMING | MACHINE_NO_SOUND ) // Operation Tiger Ver 2.14 O, Oct  5 1998  13:58:13
-GAME( 1998, optigera,  optiger, taitopjc, taitopjc, taitopjc_state, init_optiger, ROT0, "Taito", "Operation Tiger (Ver 2.10 O)",                MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_TIMING | MACHINE_NO_SOUND ) // Operation Tiger Ver 2.10 O, Sep 19 1998  14:06:18
-GAME( 1998, optigerj,  optiger, taitopjc, taitopjc, taitopjc_state, init_optiger, ROT0, "Taito", "Operation Tiger (Ver 2.09 J)",                MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_TIMING | MACHINE_NO_SOUND ) // Operation Tiger Ver 2.09 J, Sep 12 1998  19:28:59
-GAME( 1998, optigersm, 0,       taitopjc, taitopjc, taitopjc_state, init_optiger, ROT0, "Taito", "Operation Tiger Second Mission (Ver 2.02 J)", MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_TIMING | MACHINE_NO_SOUND ) // Operation Tiger Ver 2.02 J, Second Mission, Feb 16 1999  14:23:36
+GAME( 1998, optiger,   0,       taitopjc, taitopjc, taitopjc_state, init_optiger, ROT0, "Taito", "Operation Tiger (Ver 2.14 O)",                MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_TIMING | MACHINE_IMPERFECT_SOUND ) // Operation Tiger Ver 2.14 O, Oct  5 1998  13:58:13
+GAME( 1998, optigera,  optiger, taitopjc, taitopjc, taitopjc_state, init_optiger, ROT0, "Taito", "Operation Tiger (Ver 2.10 O)",                MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_TIMING | MACHINE_IMPERFECT_SOUND ) // Operation Tiger Ver 2.10 O, Sep 19 1998  14:06:18
+GAME( 1998, optigerj,  optiger, taitopjc, taitopjc, taitopjc_state, init_optiger, ROT0, "Taito", "Operation Tiger (Ver 2.09 J)",                MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_TIMING | MACHINE_IMPERFECT_SOUND ) // Operation Tiger Ver 2.09 J, Sep 12 1998  19:28:59
+GAME( 1998, optigersm, 0,       taitopjc, taitopjc, taitopjc_state, init_optiger, ROT0, "Taito", "Operation Tiger Second Mission (Ver 2.02 J)", MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_TIMING | MACHINE_IMPERFECT_SOUND ) // Operation Tiger Ver 2.02 J, Second Mission, Feb 16 1999  14:23:36
