@@ -1,4 +1,4 @@
-// license:BSD-3-Clause
+﻿// license:BSD-3-Clause
 // copyright-holders:R. Belmont, Olivier Galibert, ElSemi, Angelo Salese, Matthew Daniels
 /*
     Sega Model 2: i960KB + (5x TGP) or (2x SHARC) or (2x TGPx4)
@@ -19,8 +19,6 @@
               bypass it by entering then exiting service mode;
     - sgt24h: has input analog issues, steering doesn't center when neutral,
       gas and brake pedals pulses instead of being fixed;
-    - vcop2: stage select has tilemap priority issue, tilemap B (city model) has priority bit set,
-             yet it should appear underneath tilemap A ("shoot to select") which does not;
     - srallyc: initial enemy car placement seems to be slightly incorrect for a few cars,
                seems to be affected by i960 clock speed, may need wait state emulation to fix
 
@@ -183,6 +181,7 @@ void model2_state::machine_start()
 	save_item(NAME(m_geo_write_start_address));
 	save_item(NAME(m_geo_read_start_address));
 	save_item(NAME(m_geo_mesh));
+	save_item(NAME(m_geo_dual_matrix));
 
 	m_irq_delay_timer = timer_alloc(FUNC(model2_state::irq_mask_delayed_update), this);
 	m_irq_delay_timer->adjust(attotime::never);
@@ -3116,6 +3115,7 @@ void model2c_state::segawski(machine_config &config)
 void model2c_state::topskatr(machine_config &config)
 {
 	model2c(config);
+	m_geo_dual_matrix = true;
 
 	sega_315_5649_device &io(*subdevice<sega_315_5649_device>("io"));
 	io.an_port_callback<0>().set_ioport("CURVING");
