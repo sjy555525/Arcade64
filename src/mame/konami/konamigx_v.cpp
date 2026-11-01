@@ -1339,10 +1339,10 @@ VIDEO_START_MEMBER(konamigx_state, opengolf)
 	save_item(NAME(m_type1_yorigin_valid));
 	common_init();
 
-	m_k056832->set_layer_offs(0, -2+1, 0);
-	m_k056832->set_layer_offs(1,  0+1, 0);
-	m_k056832->set_layer_offs(2,  2+1, 0);
-	m_k056832->set_layer_offs(3,  3+1, 0);
+	m_k056832->set_layer_offs(0, -18+1, 0);
+	m_k056832->set_layer_offs(1, -16+1, 0);
+	m_k056832->set_layer_offs(2, -14+1, 0);
+	m_k056832->set_layer_offs(3, -13+1, 0);
 
 	m_gx_psac_tilemap = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(konamigx_state::get_gx_psac1a_tile_info)), TILEMAP_SCAN_ROWS, 16, 16, 128, 128);
 	m_gx_psac_tilemap2 = &machine().tilemap().create(*m_gfxdecode, tilemap_get_info_delegate(*this, FUNC(konamigx_state::get_gx_psac1b_tile_info)), TILEMAP_SCAN_ROWS, 16, 16, 128, 128);
