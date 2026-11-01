@@ -12,12 +12,15 @@
 
 #include "corefile.h"
 #include "corestr.h"
+#include "strformat.h"
+
 #include "osdcore.h"
 
 #include <cassert>
 #include <cctype>
 #include <cstdlib>
 #include <locale>
+#include <ostream>
 #include <sstream>
 #include <unordered_set>
 
@@ -1037,6 +1040,8 @@ void core_options::parse_ini_file(util::core_file &inifile, int priority, bool i
 			continue;
 		}
 
+		do_set_value(*curentry, trim_spaces_and_quotes(optiondata), priority, error_stream, condition, true);
+#if 0
 		// ensure INI files found earlier in the path have priority
 		std::string_view const trimmed = trim_spaces_and_quotes(optiondata);
 		if (entries_set.find(curentry.get()) != entries_set.end())
@@ -1068,6 +1073,7 @@ void core_options::parse_ini_file(util::core_file &inifile, int priority, bool i
 				condition = std::max(condition, condition_type::ERR);
 			}
 		}
+#endif
 	}
 
 	// did we have any errors that may need to be aggregated?
@@ -1125,12 +1131,9 @@ void core_options::copy_from(const core_options &that)
 //  the optional diff
 //-------------------------------------------------
 
-std::string core_options::output_ini(const core_options *diff) const
+void core_options::output_ini(std::ostream &str, const core_options *diff) const
 {
 	// INI files are complete, so always start with a blank buffer
-	std::ostringstream buffer;
-	buffer.imbue(std::locale::classic());
-
 	int num_valid_headers = 0;
 	int unadorned_index = 0;
 	const char *last_header = nullptr;
@@ -1167,8 +1170,8 @@ std::string core_options::output_ini(const core_options *diff) const
 					if (last_header)
 					{
 						if (num_valid_headers++)
-							buffer << '\n';
-						util::stream_format(buffer, "#\n# %s\n#\n", last_header);
+							str << '\n';
+						util::stream_format(str, "#\n# %s\n#\n", last_header);
 						last_header = nullptr;
 					}
 
@@ -1176,15 +1179,14 @@ std::string core_options::output_ini(const core_options *diff) const
 					if (!is_unadorned)
 					{
 						if (strchr(value, ' '))
-							util::stream_format(buffer, "%-25s \"%s\"\n", name, value);
+							util::stream_format(str, "%-25s \"%s\"\n", name, value);
 						else
-							util::stream_format(buffer, "%-25s %s\n", name, value);
+							util::stream_format(str, "%-25s %s\n", name, value);
 					}
 				}
 			}
 		}
 	}
-	return buffer.str();
 }
 
 
@@ -1192,26 +1194,22 @@ std::string core_options::output_ini(const core_options *diff) const
 //  output_help - output option help to a string
 //-------------------------------------------------
 
-std::string core_options::output_help() const
+void core_options::output_help(std::ostream &str) const
 {
-	// start empty
-	std::ostringstream buffer;
-
 	// loop over all items
 	for (auto &curentry : m_entries)
 	{
 		if (curentry->type() == option_type::HEADER)
 		{
 			// header: just print
-			util::stream_format(buffer, "\n#\n# %s\n#\n", curentry->description());
+			util::stream_format(str, "\n#\n# %s\n#\n", curentry->description());
 		}
 		else if (curentry->description() != nullptr)
 		{
 			// otherwise, output entries for all non-deprecated items
-			util::stream_format(buffer, "-%-19s %s\n", curentry->name(), curentry->description());
+			util::stream_format(str, "-%-19s %s\n", curentry->name(), curentry->description());
 		}
 	}
-	return buffer.str();
 }
 
 

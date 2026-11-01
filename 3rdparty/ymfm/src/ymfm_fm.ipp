@@ -1344,8 +1344,12 @@ void fm_engine_base<RegisterType>::output(output_data &output, uint32_t rshift, 
 		assert(m_regs.noise_enable() == 0);
 
 		// precompute the operator 13+17 phase selection value
-		uint32_t op13phase = m_operator[13]->phase();
-		uint32_t op17phase = m_operator[17]->phase();
+		uint32_t op13phase = 0, op17phase = 0;
+		if constexpr (OPERATORS > 17)
+		{
+			op13phase = m_operator[13]->phase();
+			op17phase = m_operator[17]->phase();
+		}
 		uint32_t phase_select = (bitfield(op13phase, 2) ^ bitfield(op13phase, 7)) | bitfield(op13phase, 3) | (bitfield(op17phase, 5) ^ bitfield(op17phase, 3));
 
 		// sum over all the desired channels
@@ -1504,7 +1508,7 @@ void fm_engine_base<RegisterType>::update_timer(uint32_t tnum, uint32_t enable, 
 template<class RegisterType>
 void fm_engine_base<RegisterType>::engine_timer_expired(uint32_t tnum)
 {
-	assert(tnum == 0 || tnum == 1);
+	if (tnum > 1) return;
 
 	// update status
 	if (tnum == 0 && m_regs.enable_timer_a())

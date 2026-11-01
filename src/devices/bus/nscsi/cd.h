@@ -28,9 +28,9 @@ protected:
 	nscsi_cdrom_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, const char *mfr, const char *product, const char *rev, uint8_t inq_data, uint8_t compliance)
 		: nscsi_cdrom_device(mconfig, type, tag, owner, 0)
 	{
-		strncpy(manufacturer, mfr, 8);
-		strncpy(this->product, product, 16);
-		strncpy(revision, rev, 4);
+		snprintf(manufacturer, 8, "%s", mfr);
+		snprintf(this->product, 16, "%s", product);
+		snprintf(revision, 4, "%s", rev);
 		inquiry_data = inq_data;
 		this->compliance = compliance;
 	}
@@ -52,6 +52,13 @@ protected:
 	bool m_removal_prevented;
 
 private:
+	struct toolbox_directory_entry
+	{
+		std::string name;
+		osd::directory::entry::entry_type type;
+		uint64_t size;
+	};
+
 	static constexpr uint32_t bytes_per_sector = 2048;
 
 	u32 sequence_counter;
@@ -74,7 +81,7 @@ private:
 	uint32_t m_write_offset;
 	bool m_write_is_setup;
 	std::string m_write_path;
-	std::vector<osd::directory::entry> m_directory;
+	std::vector<toolbox_directory_entry> m_directory;
 	std::vector<uint8_t> m_xfer_buffer;
 };
 

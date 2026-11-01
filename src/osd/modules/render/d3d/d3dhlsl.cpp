@@ -17,6 +17,7 @@
 #include "rendlay.h"
 #include "rendutil.h"
 #include "screen.h"
+#include "video.h"
 
 #include "aviio.h"
 #include "png.h"
@@ -463,7 +464,7 @@ bool shaders::init(IDirect3D9 *d3dobj, running_machine *machine, renderer_d3d9 *
 		options = new hlsl_options;
 		options->params_init = false;
 
-		strncpy(options->shadow_mask_texture, winoptions.screen_shadow_mask_texture(), sizeof(options->shadow_mask_texture));
+		snprintf(options->shadow_mask_texture, sizeof(options->shadow_mask_texture), "%s", winoptions.screen_shadow_mask_texture());
 		options->shadow_mask_tile_mode = winoptions.screen_shadow_mask_tile_mode();
 		options->shadow_mask_alpha = winoptions.screen_shadow_mask_alpha();
 		options->shadow_mask_count_x = winoptions.screen_shadow_mask_count_x();
@@ -535,9 +536,9 @@ bool shaders::init(IDirect3D9 *d3dobj, running_machine *machine, renderer_d3d9 *
 		options->bloom_level6_weight = winoptions.screen_bloom_lvl6_weight();
 		options->bloom_level7_weight = winoptions.screen_bloom_lvl7_weight();
 		options->bloom_level8_weight = winoptions.screen_bloom_lvl8_weight();
-		strncpy(options->lut_texture, winoptions.screen_lut_texture(), sizeof(options->lut_texture));
+		snprintf(options->lut_texture, sizeof(options->lut_texture), "%s", winoptions.screen_lut_texture());
 		options->lut_enable = winoptions.screen_lut_enable();
-		strncpy(options->ui_lut_texture, winoptions.ui_lut_texture(), sizeof(options->ui_lut_texture));
+		snprintf(options->ui_lut_texture, sizeof(options->ui_lut_texture), "%s", winoptions.ui_lut_texture());
 		options->ui_lut_enable = winoptions.ui_lut_enable();
 
 		options->params_init = true;
@@ -1210,8 +1211,8 @@ int shaders::scanline_pass(d3d_render_target *rt, int source_index, poly_info *p
 	//if (options->scanline_alpha == 0.0f)
 		//return next_index;
 
-	screen_device_enumerator screen_iterator(machine->root_device());
-	screen_device *screen = screen_iterator.byindex(target_to_screen[curr_target]);
+	video_output_interface_enumerator screen_iterator(machine->root_device());
+	device_video_output_interface *screen = screen_iterator.byindex(target_to_screen[curr_target]);
 	render_container &screen_container = screen->container();
 	float xscale = 1.0f / screen_container.xscale();
 	float yscale = 1.0f / screen_container.yscale();
@@ -1289,8 +1290,8 @@ int shaders::post_pass(d3d_render_target *rt, int source_index, poly_info *poly,
 {
 	int next_index = source_index;
 
-	screen_device_enumerator screen_iterator(machine->root_device());
-	screen_device *screen = screen_iterator.byindex(target_to_screen[curr_target]);
+	video_output_interface_enumerator screen_iterator(machine->root_device());
+	device_video_output_interface *screen = screen_iterator.byindex(target_to_screen[curr_target]);
 	render_container &screen_container = screen->container();
 
 	float xscale = 1.0f / screen_container.xscale();
@@ -2277,19 +2278,19 @@ void shaders::init_slider_list()
 
 	internal_sliders.clear();
 
-	const screen_device *first_screen = screen_device_enumerator(machine->root_device()).first();
+	const device_video_output_interface *first_screen = video_output_interface_enumerator(machine->root_device()).first();
 	if (first_screen == nullptr)
 	{
 		return;
 	}
-	int screen_type = first_screen->screen_type();
 
 	for (int i = 0; s_sliders[i].name != nullptr; i++)
 	{
+		const screen_device *as_screen = dynamic_cast<const screen_device *>(first_screen);
 		slider_desc *desc = &s_sliders[i];
-		if ((screen_type == SCREEN_TYPE_VECTOR && (desc->screen_type & SLIDER_SCREEN_TYPE_VECTOR) == SLIDER_SCREEN_TYPE_VECTOR) ||
-			(screen_type == SCREEN_TYPE_RASTER && (desc->screen_type & SLIDER_SCREEN_TYPE_RASTER) == SLIDER_SCREEN_TYPE_RASTER) ||
-			(screen_type == SCREEN_TYPE_LCD    && (desc->screen_type & SLIDER_SCREEN_TYPE_LCD)    == SLIDER_SCREEN_TYPE_LCD))
+		if (((desc->screen_type & SLIDER_SCREEN_TYPE_VECTOR) == SLIDER_SCREEN_TYPE_VECTOR && first_screen->is_vector()) ||
+			((desc->screen_type & SLIDER_SCREEN_TYPE_RASTER) == SLIDER_SCREEN_TYPE_RASTER && as_screen && !as_screen->is_lcd()) ||
+			((desc->screen_type & SLIDER_SCREEN_TYPE_LCD) == SLIDER_SCREEN_TYPE_LCD && as_screen && as_screen->is_lcd()))
 		{
 			int count;
 			switch (desc->slider_type)
@@ -2362,11 +2363,11 @@ void uniform::update()
 	hlsl_options *options = shadersys->options;
 	renderer_d3d9 *d3d = shadersys->d3d;
 
-	const screen_device *first_screen = screen_device_enumerator(d3d->window().machine().root_device()).first();
+	const device_video_output_interface *first_screen = video_output_interface_enumerator(d3d->window().machine().root_device()).first();
 
 	bool vector_screen =
 		first_screen != nullptr &&
-		first_screen->screen_type() == SCREEN_TYPE_VECTOR;
+		first_screen->is_vector();
 
 	switch (m_id)
 	{
