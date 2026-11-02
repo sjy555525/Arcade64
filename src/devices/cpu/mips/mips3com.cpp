@@ -23,10 +23,6 @@ void mips3_device::execute_set_input(int inputnum, int state)
 			m_core->cpr[0][COP0_Cause] |= 0x400 << inputnum;
 		else
 			m_core->cpr[0][COP0_Cause] &= ~(0x400 << inputnum);
-
-		/* the interpreter only checks at the top of execute_run; the DRC has its own check points */
-		if (!m_isdrc)
-			check_irqs();
 	}
 }
 
@@ -42,8 +38,8 @@ void mips3_device::execute_set_input(int inputnum, int state)
 
 void mips3_device::mips3com_update_cycle_counting()
 {
-	/* a Count write has to re-time an armed compare as well */
-	if (m_core->compare_armed || m_compare_int_timer->enabled())
+	/* modify the timer to go off */
+	if (m_core->compare_armed)
 	{
 		uint32_t count = (total_cycles() - m_core->count_zero_time) / 2;
 		uint32_t compare = m_core->cpr[0][COP0_Compare];
@@ -51,6 +47,7 @@ void mips3_device::mips3com_update_cycle_counting()
 		m_core->compare_armed = 0;
 		attotime newtime = cycles_to_attotime((uint64_t)delta * 2);
 		m_compare_int_timer->adjust(newtime);
+		return;
 	}
 }
 
@@ -108,18 +105,15 @@ void mips3_device::mips3com_tlbwi()
 
 
 /*-------------------------------------------------
-    get_random_index - the value Random reads as
+generate_tlb_index - generate a random tlb index
 -------------------------------------------------*/
 
-uint32_t mips3_device::get_random_index()
+uint32_t mips3_device::generate_tlb_index()
 {
-	/* counts cycles down from the upper bound, so a Wired write reads back as m_tlbentries - 1 */
-	const uint32_t wired = m_core->cpr[0][COP0_Wired] & 0x3f;
-
-	if (wired < m_tlbentries)
-		return ((m_tlbentries - 1) - (total_cycles() - m_core->random_zero_time) % (m_tlbentries - wired)) & 0x3f;
-	else
-		return m_tlbentries - 1;
+	// Actual hardware uses a free running counter to generate the index.
+	// This implementation uses a linear congruential generator so that DRC and non-DRC code sequences match.
+	m_tlb_seed = 214013 * m_tlb_seed + 2531011;
+	return (m_tlb_seed >> 16) & 0x3f;
 }
 
 /*-------------------------------------------------
@@ -128,8 +122,16 @@ uint32_t mips3_device::get_random_index()
 
 void mips3_device::mips3com_tlbwr()
 {
-	/* the same index MFC0 Random would have reported */
-	tlb_write_common(get_random_index());
+	uint32_t wired = m_core->cpr[0][COP0_Wired] & 0x3f;
+	uint32_t unwired = m_tlbentries - wired;
+	uint32_t tlbindex = m_tlbentries - 1;
+
+	/* "random" is based off of linear congruential sequence through the non-wired pages */
+	if (unwired > 0)
+		tlbindex = (generate_tlb_index() % unwired) + wired;
+
+	/* use the common handler to write to this tlbindex */
+	tlb_write_common(tlbindex);
 }
 
 
@@ -176,7 +178,7 @@ void mips3_device::mips3com_tlbp()
 
 TIMER_CALLBACK_MEMBER( mips3_device::compare_int_callback )
 {
-	/* the timer stays disabled until the next Compare write */
+	m_compare_int_timer->adjust(attotime::never);
 	set_input_line(MIPS3_IRQ5, ASSERT_LINE);
 }
 
@@ -191,9 +193,8 @@ uint32_t mips3_device::compute_config_register()
 	/* set the cache line size to 32 bytes */
 	uint32_t configreg = 0x00026030;
 
-	// MIPS32 Config: M (Config1 present), MT = 1 (standard TLB), K0 = 3 (cacheable)
-	if (m_flavor == MIPS3_TYPE_XBURST)
-		return 0x80000083;
+	m_dcache = nullptr;
+	m_icache = nullptr;
 
 	// NEC VR series does not use a 100% compatible COP0/TLB implementation
 	if (m_flavor == MIPS3_TYPE_VR4300)
@@ -333,10 +334,6 @@ uint32_t mips3_device::compute_prid_register()
 		case MIPS3_TYPE_R5900:
 			return 0x2e14;
 
-		case MIPS3_TYPE_XBURST:
-			// JZ4755 programming manual, section 2: Ingenic company ID 0xd0, JZRISC core
-			return 0x1ed0024f;
-
 		default:
 			fatalerror("Unknown MIPS flavor specified\n");
 	}
@@ -437,10 +434,8 @@ void mips3_device::tlb_write_common(int tlbindex)
 		/* fill in the new TLB entry from the COP0 registers */
 		entry.page_mask = m_core->cpr[0][COP0_PageMask];
 		entry.entry_hi = m_core->cpr[0][COP0_EntryHi] & ~(entry.page_mask & u64(0x000000007fffe000U));
-		/* one G bit per entry, set only when both halves of EntryLo have it */
-		const uint64_t global = m_core->cpr[0][COP0_EntryLo0] & m_core->cpr[0][COP0_EntryLo1] & TLB_GLOBAL;
-		entry.entry_lo[0] = (m_core->cpr[0][COP0_EntryLo0] & ~uint64_t(TLB_GLOBAL)) | global;
-		entry.entry_lo[1] = (m_core->cpr[0][COP0_EntryLo1] & ~uint64_t(TLB_GLOBAL)) | global;
+		entry.entry_lo[0] = m_core->cpr[0][COP0_EntryLo0];
+		entry.entry_lo[1] = m_core->cpr[0][COP0_EntryLo1];
 
 		/* remap this TLB entry */
 		tlb_map_entry(tlbindex);
