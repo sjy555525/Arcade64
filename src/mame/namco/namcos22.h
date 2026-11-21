@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "namco_c139.h"
+
 #include "namcomcu.h"
 
 #include "bus/snes_ctrl/ctrl.h"
@@ -213,6 +215,7 @@ public:
 		m_eeprom(*this, "eeprom"),
 		m_mb87078(*this, "mb87078"),
 		m_c352(*this, "c352"),
+		m_sci(*this, "sci"),
 		m_shareram(*this, "shareram"),
 		m_slave_extram(*this, "slaveextram"),
 		m_master_extram(*this, "masterextram"),
@@ -323,8 +326,6 @@ protected:
 	u16 dsp_slave_port8_r();
 	u16 dsp_slave_portb_r();
 	void dsp_slave_portb_w(u16 data);
-	u16 namcos22_sci_r(offs_t offset);
-	void namcos22_sci_w(offs_t offset, u16 data);
 	u16 namcos22_shared_r(offs_t offset);
 	void namcos22_shared_w(offs_t offset, u16 data, u16 mem_mask = ~0);
 	u16 namcos22_keycus_r(offs_t offset);
@@ -395,6 +396,7 @@ protected:
 	void draw_polygons();
 	void draw_sprites();
 	void draw_sprite_group(const u32 *src, const u32 *attr, int num_sprites, int deltax, int deltay, bool y_lowres);
+	void vics_copy_sprite_data();
 	void namcos22_mix_text_layer(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
 	void install_c74_speedup();
@@ -426,6 +428,7 @@ protected:
 	required_device<eeprom_parallel_28xx_device> m_eeprom;
 	optional_device<mb87078_device> m_mb87078;
 	required_device<c352_device> m_c352;
+	required_device<namco_c139_device> m_sci;
 	required_shared_ptr<u16> m_shareram;
 	required_shared_ptr<u16> m_slave_extram;
 	required_shared_ptr<u16> m_master_extram;
@@ -516,6 +519,7 @@ protected:
 	bool m_skipped_this_frame = false;
 	void render_frame_active();
 	void screen_vblank(int state);
+	void sci_int_w(int state);
 	bool m_pdp_render_done = false;
 	bool m_render_refresh = false;
 	u64 m_pdp_frame = 0;
