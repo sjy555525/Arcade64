@@ -1746,7 +1746,7 @@ TIMER_DEVICE_CALLBACK_MEMBER(namcos2_base_state::screen_scanline)
 	}
 }
 
-void namcos2_state::sci_int_w(int state)
+void namcos2_base_state::sci_int_w(int state)
 {
 	m_master_intc->sci_irq_trigger();
 	m_slave_intc->sci_irq_trigger();
