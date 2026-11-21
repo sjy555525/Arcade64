@@ -196,7 +196,7 @@ void namco_de_pcbstack_device::device_add_mconfig(machine_config &config)
 	NAMCO_C148(config, m_slave_intc, m_slave, false);
 	m_slave_intc->link_c148_device(m_master_intc);
 
-	NAMCO_C139(config, m_sci);
+	NAMCO_C139(config, m_sci, 0U);
 	m_sci->irq_cb().set(FUNC(namco_de_pcbstack_device::sci_int_w));
 
 	// video hardware
