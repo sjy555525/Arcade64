@@ -4339,8 +4339,6 @@ taito/suprridr.cpp
 taito/taitoair.cpp         // no inputs ingame
 
 taito/taitojc.cpp
--dangcurv
--dangcurvj
 
 taito/taitopjc.cpp
 
